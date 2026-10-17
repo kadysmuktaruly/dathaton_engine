@@ -75,3 +75,6 @@ Effects on the rules: opening the safe while a client is present is normal (X-35
 | D1 | X-17 | rule (collection bag appears on the desk and is moved off within a short time without a pause to inspect it) |
 | B3 | X-40 | rule (handbag/backpack/coat on the desk or staff side) |
 | A3 / A5 / A2 / X0 | X-1, X-2, X-4@68, X-46 (best guesses) | VLM catch-all / fallback only |
+
+### Correction (2026-10-17, confirmed by the user)
+X-32 and X-33 are **C2 (cash-room door left open)**, not C1. The clean clip X-31 shows the same walk-in, but the cashier closes the glass door behind her (7 s). In X-32 the door stays open from 5 s to the end. In X-33 it stays open and a man appears in the open doorway at 11–13 s. C1 is now X-18 and X-30. C2 is checked by the VLM on frames after an entry (there is no door class in the detector).

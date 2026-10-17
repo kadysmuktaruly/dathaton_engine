@@ -79,7 +79,7 @@ def _cache_path(video: Path, fps: float) -> Path:
     with open(video, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    key = f"{h.hexdigest()[:16]}_fps{fps:g}_v1"
+    key = f"{h.hexdigest()[:16]}_fps{fps:g}_v2"
     return config.CACHE_DIR / "perception" / f"{key}.parquet"
 
 
@@ -92,8 +92,9 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
     info = probe(str(video))
     times = sample_times(info.duration, fps)
     cache = _cache_path(video, fps)
-    if use_cache and cache.exists():
-        return Perception(info, times, pd.read_parquet(cache), {"cached": True})
+    tcache = cache.with_suffix(".times.npy")
+    if use_cache and cache.exists() and tcache.exists():
+        return Perception(info, np.load(tcache).tolist(), pd.read_parquet(cache), {"cached": True})
 
     models = models or Models()
     tracker = sv.ByteTrack(frame_rate=int(round(fps)), lost_track_buffer=int(4 * fps),  # TUNE
@@ -138,8 +139,11 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
                              int(tracked.tracker_id[i]), kps[i]))
         buf.clear()
 
+    actual: list[float] = []
     t0 = time.time()
     for fi, (_, t, frame) in enumerate(iter_frames_at(str(video), times, info.crop)):
+        t = round(float(t), 4)
+        actual.append(t)
         buf.append((fi, t, frame))
         if len(buf) >= batch:
             t_dec += time.time() - t0
@@ -152,5 +156,6 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
                                      "track_id", "kps"])
     cache.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache)
-    return Perception(info, times, df, {"decode_s": round(t_dec, 2), "detect_s": round(t_det, 2),
+    np.save(tcache, np.array(actual))
+    return Perception(info, actual, df, {"decode_s": round(t_dec, 2), "detect_s": round(t_det, 2),
                                         "pose_s": round(t_pose, 2), "frames": len(times)})
