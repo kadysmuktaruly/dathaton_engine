@@ -1,0 +1,166 @@
+W1018 02:54:23.117000 5046 .venv/lib/python3.11/site-packages/torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/529 [00:00<?, ?it/s]Loading weights: 100%|██████████| 529/529 [00:00<00:00, 13407.05it/s]
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+load /Users/amanzholov/PythonProjects/dathaton_engine/weights/rtmpose/20230831/rtmpose_onnx/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504/end2end.onnx with onnxruntime backend
+X-1 L - [] [22.0] 6.8s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-2 L P [(14.7, 'B1')] [10.0] 5.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-3 - - [] [] 0.7s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-4 L P [(55.3, 'B1')] [57.0, 68.0] 5.9s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-5 - - [] [] 43.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-8 - - [] [] 1.0s
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-10 - P [(6.7, 'B1')] [] 3.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-11 L P [(17.7, 'B5')] [18.0] 9.6s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-12 - - [] [] 5.0s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-13 L - [] [47.0] 6.5s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-14 - - [] [] 3.0s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-15 L P [(15.7, 'B1')] [15.0] 3.8s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-16 - - [] [] 0.8s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-17 L P [(7.0, 'D1')] [7.0] 5.5s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-18 L P [(13.0, 'B1'), (17.0, 'C1')] [20.0] 8.1s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-19 - P [(10.5, 'X0')] [] 6.1s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-20 L - [] [5.0] 0.5s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-21 - - [] [] 0.7s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-22 L P [(9.0, 'B5')] [14.0] 8.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-23 - - [] [] 1.6s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-24 L P [(2.5, 'X0'), (9.0, 'B5')] [8.0] 12.6s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-25 - - [] [] 4.9s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-26 L P [(8.0, 'B1')] [9.0] 5.6s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-27 - - [] [] 4.7s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-28 L P [(6.0, 'B5'), (12.7, 'B5')] [7.0] 15.5s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-29 - P [(6.3, 'B5')] [] 8.2s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-30 L P [(3.0, 'C2'), (12.7, 'C1')] [13.0] 7.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-31 - - [] [] 0.7s
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-32 L P [(4.7, 'C2')] [5.0] 4.2s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-33 L P [(1.7, 'B5'), (4.3, 'C2')] [6.0] 11.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-34 L P [(8.7, 'B1')] [13.0] 3.9s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-35 - - [] [] 1.4s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-37 - - [] [] 0.6s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-38 L - [] [33.0] 41.4s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-39 - P [(7.0, 'B1')] [] 9.3s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-40 L P [(14.5, 'B3')] [17.0] 7.2s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-43 - - [] [] 0.7s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-44 L - [] [16.0] 0.7s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+X-45 - - [] [] 0.9s
+RuntimeWarning: All-NaN slice encountered
+RuntimeWarning: All-NaN slice encountered
+[transformers] Kwargs passed to `processor.__call__` have to be in `processor_kwargs` dict, not in `**kwargs`
+X-46 L P [(10.0, 'X0')] [11.0] 6.3s
+{
+ "videos": 40,
+ "tp": 16,
+ "fp": 4,
+ "fn": 5,
+ "tn": 15,
+ "precision": 0.8,
+ "recall": 0.762,
+ "f1": 0.78,
+ "timecodes_total": 22,
+ "timecodes_matched": 17,
+ "err_median": 1.0,
+ "err_max": 12.7,
+ "within_1s": 0.529,
+ "within_2s": 0.647,
+ "win_err_median": 0.0,
+ "type_acc": 0.824,
+ "time_mean_s": 6.83,
+ "time_max_s": 43.34,
+ "peak_rss_gb": 6.48
+}
+report: /Users/amanzholov/PythonProjects/dathaton_engine/orig_and_vlm/reports/eval_ov_full2.md
