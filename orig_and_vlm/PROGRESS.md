@@ -1,7 +1,14 @@
 # orig_and_vlm — progress checklist (handoff file)
 
-Branch `orig_and_vlm`, cut from `origin/main` at `95d35a6`, local only, not pushed. Everything new is in this folder;
-no file outside it was edited.
+Branch `orig-and-vlm` on GitHub, cut from `origin/main` at `95d35a6`. Everything new is in this folder; no file
+outside it was edited.
+
+**Labels caveat (from the team, 2026-10-18).** The per-clip violation *types* used for "right type" are wrong
+for most violation clips: `CONFIRMED` in `tools/eval.py` and `reports/dataset_review.md` are early guesses. The
+team is relabeling every clip by hand with context: what happened, what was missed, what must have been done.
+So "type accuracy" numbers here are not reliable yet. Verdict (TP/FP/FN/TN) and timecode errors come from the
+organizers' `open_labels.xlsx` and stay valid. The team's view: the vision side is roughly ready, and the
+reasoning side (facts → type, description, rule) is what needs tuning against the new labels.
 
 ## Done (2026-10-18)
 - [x] `scan.py`, idea 1: Qwen3.5-4B desk scan in the engine's scan format. It asks first at key moments
