@@ -22,3 +22,10 @@ Licenses were checked on 2026-10-17 from the Hugging Face model card metadata (`
 | fastapi | 0.143.3 | MIT |
 
 Not used, because of their licenses: Ultralytics YOLO (AGPL-3.0), Qwen2.5-VL-3B (non-commercial), RF-DETR A/F/P/XL/2XL (PML).
+
+Labeling / fine-tuning tools (not used by the engine at inference):
+
+| Package | Version | License | How it is used |
+|---|---|---|---|
+| label-studio | 1.23.2 | Apache-2.0 (PyPI metadata `License-Expression`, classifier "Apache Software License") | Run locally with `uvx --python 3.11 label-studio` in its own throw-away env, **not** added to `pyproject.toml` (it pins its own Django/pydantic stack) |
+| torchvision (transforms.v2 augmentation) | 0.29.1 | BSD-3-Clause | already a dependency; used by `tools/train_detector.py` instead of albumentations (not installed) |

@@ -9,3 +9,6 @@ videos/
 *.mov
 label_studio_data/
 reports/sheets/
+
+# detector fine-tuning data (frames, Label Studio exports, COCO files)
+data/
