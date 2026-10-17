@@ -17,16 +17,16 @@ import pandas as pd
 from engine import config, vlm
 from engine.video import iter_frames_at
 
-PROMPT_VERSION = "v1"
-FLAGS = ["banknotes_on_desk", "counting_by_hand", "handbag_or_coat", "green_bag", "drink_cup", "safe_open"]
+PROMPT_VERSION = "v2"
+FLAGS = ["banknotes_on_desk", "bag_or_coat_on_desk", "green_bag_on_desk", "drink_cup"]
 PROMPT = (
-    "Zoomed view of a cash desk from a ceiling camera. Answer about what is visible. "
-    'Answer JSON only: {"banknotes_on_desk": true/false, "counting_by_hand": true/false, '
-    '"handbag_or_coat": true/false, "green_bag": true/false, "drink_cup": true/false, '
-    '"safe_open": true/false}. banknotes_on_desk = paper money lying on the desk. '
-    "counting_by_hand = a person is counting banknotes in their hands. handbag_or_coat = a "
-    "personal handbag, backpack or coat on or at the desk. green_bag = a green cash-collection "
-    "bag. drink_cup = a cup, mug or bottle. safe_open = the door of the metal safe is open."
+    "Zoomed view of a cash desk from a ceiling camera. Look only at objects LYING ON the desk "
+    "surface, not things a person is carrying. Answer JSON only: "
+    '{"banknotes_on_desk": true/false, "bag_or_coat_on_desk": true/false, '
+    '"green_bag_on_desk": true/false, "drink_cup": true/false}. '
+    "banknotes_on_desk = paper money lying on the desk. bag_or_coat_on_desk = a personal handbag, "
+    "backpack or coat lying on the desk. green_bag_on_desk = a green cash-collection bag lying on "
+    "the desk. drink_cup = a cup, mug or bottle on the desk or in a hand."
 )
 STEP_S = 2.0          # TUNE: scan step
 MAX_FRAMES = 18       # TUNE: cap per video (budget)
@@ -84,7 +84,11 @@ def scan(video: str, perc, scene, budget: vlm.Budget | None = None, use_cache: b
     w, h = crop[2] - crop[0], crop[3] - crop[1]
     box = desk_crop_box(scene, w, h)
     t0 = time.time()
-    rows = ask_frames(video, scan_times(perc.info.duration), box, crop, budget)
+    times = scan_times(perc.info.duration)
+    # coarse-to-fine: every other frame first, so a tight budget still covers the whole clip
+    rows = ask_frames(video, times[::2], box, crop, budget)
+    rows += ask_frames(video, times[1::2], box, crop, budget)
+    rows.sort(key=lambda r: r["t"])
     df = pd.DataFrame(rows, columns=["t"] + FLAGS)
     complete = budget is None or len(rows) == len(scan_times(perc.info.duration))
     if complete:

@@ -57,7 +57,7 @@ def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, bu
         box = vlm_scan.desk_crop_box(fa.scene, crop[2] - crop[0], crop[3] - crop[1])
         for e in events:
             ref = e.info.get("refine")
-            if ref and budget.ok(3.0):
+            if ref and ref[1] is not None and budget.ok(3.0):
                 t_new = vlm_scan.refine(video, perc, box, ref[0], ref[1], e.start, budget)
                 e.info["t_scan"] = e.start
                 e.start = t_new
