@@ -2,7 +2,7 @@
 
 Goal: one fine-tuned RT-DETRv2-R18 that detects `cash`, `safe`, `safe_open`, `counting_machine`,
 `collection_bag`, `desk` and keeps the COCO classes we use (`person`, `laptop`, `handbag`, `backpack`,
-`cell phone`, `cup`). Everything runs locally. Expected human time: **about 3–4 hours** of box correction
+`id_card`, `cup`). Everything runs locally. Expected human time: **about 3–4 hours** of box correction
 (335 frames at 30–45 s each), plus about 15 minutes of setup.
 
 **Why all 12 classes are labeled.** The fine-tuned model replaces the stock one, so it is trained on all
@@ -82,7 +82,7 @@ part. When unsure about a tiny object, box it when a person could tell what it i
 | `person` | Every person in the room, including people only partly visible. Also box people clearly visible through the glass wall (the engine filters them by position). | Reflections. |
 | `laptop` | Laptop or tablet. | Monitor-like reflections in the glass. |
 | `handbag` / `backpack` | Personal bags and coats on the desk or chair (B3). | The counting machine, the collection bag. |
-| `cell phone` | Mobile phones, including in a hand. The **desk phone is not** a cell phone: delete those boxes. | |
+| `id_card` | A client's ID document (government ID card or passport) on the desk or in a hand. A mobile phone, which is rare here, also counts as `id_card`. | The desk phone (delete those boxes), bank cards, receipts. |
 | `cup` | Cups, mugs, bottles at the desk. | |
 
 Workflow per task: delete wrong boxes (select, Backspace), fix boxes by dragging their corners, pick a label key
@@ -90,7 +90,7 @@ and drag to add a box, then **Submit**. If a frame is useless (motion blur, ever
 `skip_frame` and submit: it will be excluded. Hotkeys: the number keys select labels; Ctrl+Enter submits.
 
 Cost: the furniture boxes are usually right and only need a glance. The time goes on `cash` (check every
-hand and the desk at full zoom) and on deleting false `cell phone` boxes on the desk phone.
+hand and the desk at full zoom) and on deleting false `id_card` boxes on the desk phone.
 
 ## 5. Export → COCO
 *Export* → **JSON** (not "JSON-MIN"). Save it, e.g. as `data/labeling/export.json`, then:

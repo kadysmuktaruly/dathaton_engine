@@ -13,8 +13,8 @@ def _det(cls, conf, t=0.0, box=(100, 100, 200, 160), kind=None):
 def test_out_of_repertoire_classes_are_dropped():
     df = pd.DataFrame([_det("chair", 0.9), _det("cup", 0.9), _det("laptop", 0.9), _det("tv", 0.9)])
     out = filter_detections(df)
-    assert list(out.cls) == ["laptop", "tv"]
-    assert list(out.role) == ["laptop", "machine_like"]
+    assert list(out.cls) == ["cup", "laptop", "tv"]          # cup is kept as observation-only context
+    assert list(out.role) == ["cup", "laptop", "machine_like"]
 
 
 def test_confidence_levels():

@@ -10,7 +10,7 @@ Confidence: **H** = clear on the sheets; **M** = plausible, other readings possi
 
 | Clip | t (s) | Proposed | Conf. | What is visible |
 |---|---|---|---|---|
-| X-1 | 22 | A3? / A5? | L | Cashier takes notes from the counting machine (19.5 s), flips through them at face level (20.5–22 s), hands them to the client (22.5–23 s). |
+| X-1 | 22 | **ID** (user, see below) | H | Cashier takes notes from the counting machine (19.5 s), flips through them at face level (20.5–22 s), hands them to the client (22.5–23 s). The client never shows an ID first. |
 | X-2 | 10 | A5? / A1? | L | Client puts one blue note (or card) on the desk (9–10 s); cashier picks it up and examines it low, near her chest (10.5–13 s), then reaches back toward the client (14 s). |
 | X-4 | 57 | **B1** | H | A bundle of notes lies open on the desk, not in the drawer or safe, while the next client walks in (56–59 s). |
 | X-4 | 68 | A2? / B1 | L | Client's blue notes are counted by hand on the desk, not in the machine; the earlier bundle is still lying open. |
@@ -57,7 +57,8 @@ Effects on the rules: opening the safe while a client is present is normal (X-35
 | A1 counting finished without the client present | 1 | X-34 |
 | D1 collection bag accepted without a check | 1 | X-17 |
 | B3 personal items at the desk | 1 | X-40 |
-| Unclear | 4 | X-1, X-2, X-4@68, X-46 |
+| Cash paid out without the client showing an ID | 1 | X-1 |
+| Unclear | 3 | X-2, X-4@68, X-46 |
 
 ## What the detector needs
 - COCO stock: `person`, `laptop`, `handbag`/`backpack`/`suitcase` (B3), `cup` (X-46), `cell phone`, `dining table` (desk; to be checked in Step 2).
@@ -74,7 +75,10 @@ Effects on the rules: opening the safe while a client is present is normal (X-35
 | A1 | X-34 | rule (client leaves while cash is still at the machine or in the cashier's hands) |
 | D1 | X-17 | rule (collection bag appears on the desk and is moved off within a short time without a pause to inspect it) |
 | B3 | X-40 | rule (handbag/backpack/coat on the desk or staff side) |
-| A3 / A5 / A2 / X0 | X-1, X-2, X-4@68, X-46 (best guesses) | VLM catch-all / fallback only |
+| A3 / A5 / A2 / X0 | X-2, X-4@68, X-46 (best guesses) | VLM catch-all / fallback only |
 
 ### Correction (2026-10-17, confirmed by the user)
 X-32 and X-33 are **C2 (cash-room door left open)**, not C1. The clean clip X-31 shows the same walk-in, but the cashier closes the glass door behind her (7 s). In X-32 the door stays open from 5 s to the end. In X-33 it stays open and a man appears in the open doorway at 11–13 s. C1 is now X-18 and X-30. C2 is checked by the VLM on frames after an entry (there is no door class in the detector).
+
+### Correction (2026-10-17, confirmed by the user)
+X-1 @ 22 s: the violation is that the cashier hands cash to the client **without the client showing an ID first**. This conflicts with `rules/rules_catalog.json`, which lists «Проверка документа клиента» (Правила № 231, п. 19 пп. 1), п. 31 пп. 1)) under `do_not_flag`. The catalog needs a matching violation entry before the engine can report this type.

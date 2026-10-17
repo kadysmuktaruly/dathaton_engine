@@ -6,7 +6,7 @@
   text prompts (sigmoid score). Then a per-class threshold, per-class NMS and a per-class cap on boxes.
   safe vs safe_open is decided by which exemplar set is closer. Thresholds were picked by looking at
   overlays of every 6th/28th frame; they lean towards recall: the human deletes more than they draw.
-- COCO classes (person, laptop, handbag, backpack, cell phone, cup): the stock RT-DETRv2 detector,
+- COCO classes (person, laptop, handbag, backpack, id_card, cup): the stock RT-DETRv2 detector,
   which is already good on these, so the human only checks them.
 
 Outputs (in data/labeling/):
@@ -77,7 +77,7 @@ EXEMPLARS: list[tuple[str, float, str, tuple[float, float, float, float]]] = [
     ("X-12", 20.0, "safe", (225, 304, 298, 397)),
     ("X-30", 1.53, "desk", (37, 363, 293, 453)),
 ]
-COCO_THRESH = {"person": 0.5, "laptop": 0.4, "handbag": 0.4, "backpack": 0.4, "cell phone": 0.4, "cup": 0.4}
+COCO_THRESH = {"person": 0.5, "laptop": 0.4, "handbag": 0.4, "backpack": 0.4, "id_card": 0.4, "cup": 0.4}
 NMS_IOU = 0.5
 
 

@@ -61,6 +61,24 @@ tr.hl td { background: var(--chip); }
 .bar i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
 .bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg); }
 .note { font-size: .8rem; color: var(--muted); max-width: 90ch; }
+:root { --c-true: #d92d20; --c-hit: #12b76a; --c-fa: #f79009; --c-pred: #7a5af8; }
+.tag { font-size: .7rem; padding: 0 6px; border-radius: 999px; border: 1px solid currentColor; margin-left: 6px; }
+.tag.hit { color: var(--c-hit); } .tag.miss { color: var(--c-true); } .tag.fa { color: var(--c-fa); } .tag.ok { color: var(--muted); }
+.chip .code { display: block; font-size: .72rem; color: var(--muted); }
+.truth { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.truth .line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: .9rem; }
+.truth .k { width: 6.5rem; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; }
+.jump { font: 12px var(--f-data); border: 1px solid currentColor; background: transparent; border-radius: 4px; padding: 1px 7px; cursor: pointer; }
+.jump.true { color: var(--c-true); } .jump.pred { color: var(--c-pred); }
+.timeline svg { width: 100%; height: 46px; display: block; cursor: pointer; }
+.layers { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .88rem; }
+.layers label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.reasons { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 12px; font-size: .8rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 4px 16px; }
+.reasons h3 { grid-column: 1 / -1; margin: 4px 0 0; font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+.reasons div { display: flex; justify-content: space-between; gap: 8px; }
+.reasons b { font-family: var(--f-data); font-weight: 500; }
+.prov-explicit { color: var(--c-hit); } .prov-proxy { color: var(--c-fa); }
+.near { position: absolute; left: 8px; bottom: 8px; font: 12px var(--f-data); color: #fff; background: var(--c-true); padding: 2px 6px; border-radius: 3px; }
 </style>
 </head>
 <body>
@@ -70,11 +88,20 @@ tr.hl td { background: var(--chip); }
     <div class="sub" id="meta"></div>
   </header>
 
-  <div><div class="lbl">Clip</div><div class="row" id="clips"></div></div>
+  <div>
+    <div class="row" style="justify-content:space-between"><div class="lbl">Clip</div>
+      <div class="row" id="filter" role="group" aria-label="Filter clips">
+        <button class="chip" type="button" data-f="all">All</button><button class="chip" type="button" data-f="viol">Labelled violations</button>
+        <button class="chip" type="button" data-f="miss">Misses</button><button class="chip" type="button" data-f="fa">False alarms</button>
+      </div></div>
+    <div class="row" id="clips"></div>
+  </div>
 
   <div class="main">
     <div class="side" style="gap:10px">
-      <div class="frame" id="frame"><img id="img" alt=""><svg id="ov" aria-hidden="true"></svg><div class="hud" id="hud"></div><div class="empty-tag" id="emptyTag" hidden>no boxes</div></div>
+      <div class="frame" id="frame"><img id="img" alt=""><svg id="ov" aria-hidden="true"></svg><div class="hud" id="hud"></div><div class="empty-tag" id="emptyTag" hidden>no boxes</div><div class="near" id="near" hidden></div></div>
+      <div class="truth" id="truth"></div>
+      <div class="timeline"><div class="lbl">Timeline · red = labelled violation, purple = engine alert, line = this frame</div><svg id="tl" aria-hidden="true"></svg></div>
       <div class="nav"><button class="chip" id="prev" type="button">◀ Prev</button><button class="chip" id="next" type="button">Next ▶</button><span id="pos"></span></div>
       <div><div class="lbl">Frames · height = boxes above the cutoff, amber = no detections</div><div class="strip" id="strip"></div></div>
     </div>
@@ -85,12 +112,16 @@ tr.hl td { background: var(--chip); }
         <div><label for="objMin">Object cutoff <output id="objOut"></output></label><input type="range" id="objMin" min="0.25" max="0.95" step="0.05"></div>
         <div><label for="perMin">Person cutoff <output id="perOut"></output></label><input type="range" id="perMin" min="0.25" max="0.95" step="0.05"></div>
       </div>
-      <div class="row">
-        <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="showWeak" checked> Show boxes below the cutoff (dashed)</label>
+      <div><div class="lbl">Layers</div><div class="layers">
+        <label><input type="checkbox" id="lyRaw"> Raw: everything the detector returned (dropped boxes dotted grey)</label>
+        <label><input type="checkbox" id="showWeak" checked> Layout-only boxes (dashed)</label>
+        <label><input type="checkbox" id="lyTracks" checked> Track ids</label>
+        <label><input type="checkbox" id="lyAnchors" checked> Scene anchors + provenance</label>
         <button class="chip" id="reset" type="button">Engine settings</button>
-      </div>
+      </div></div>
+      <div class="reasons" id="reasons"></div>
       <div><div class="lbl">Classes</div><div class="classes" id="classes"></div></div>
-      <div class="list"><table><thead><tr><th>Class</th><th>Role</th><th>Confidence</th><th>Box (cropped px)</th><th>Box (original px)</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <div class="list"><table><thead><tr><th>Class</th><th>Role</th><th>Confidence</th><th>Reason</th><th>Track</th><th>Box (cropped px)</th><th>Box (original px)</th></tr></thead><tbody id="rows"></tbody></table></div>
       <p class="note" id="note"></p>
     </div>
   </div>
@@ -104,7 +135,14 @@ tr.hl td { background: var(--chip); }
   const NS = 'http://www.w3.org/2000/svg';
   const PALETTE = D.colors;
   const color = (c) => PALETTE[c] || '#9e9e9e';
-  const st = { clip: 0, frame: 0, obj: D.run.obj_min, per: D.run.person_min, weak: true, hidden: new Set(), hl: -1 };
+  const st = { clip: 0, frame: 0, obj: D.run.obj_min, per: D.run.person_min, weak: true, hidden: new Set(), hl: -1, filter: 'all',
+               raw: false, tracks: true, anchors: true };
+  const dropped = (d) => d.reason !== undefined && d.reason !== '' && !d.retained;
+  const outcome = (c) => { const t = c.truth; if (!t) return null; return t.labelled ? (t.predicted_flag ? 'hit' : 'miss') : (t.predicted_flag ? 'fa' : 'ok'); };
+  const OUT_TEXT = { hit: 'caught', miss: 'missed', fa: 'false alarm', ok: 'clean' };
+  const visible = () => D.clips.map((c, i) => i).filter(i => { const o = outcome(D.clips[i]);
+    return st.filter === 'all' || (st.filter === 'viol' && (o === 'hit' || o === 'miss')) || o === st.filter; });
+  const nearestFrame = (c, t) => c.frames.reduce((b, f, i) => Math.abs(f.actual_t - t) < Math.abs(c.frames[b].actual_t - t) ? i : b, 0);
   const floorOf = (d) => d.cls === 'person' ? st.per : st.obj;
   const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
   const fmtBox = (b) => b.map(v => Math.round(v)).join(', ');
@@ -117,13 +155,17 @@ tr.hl td { background: var(--chip); }
 
   function clipButtons() {
     const box = $('clips'); box.innerHTML = '';
-    D.clips.forEach((c, i) => {
+    [...$('filter').children].forEach(b => b.setAttribute('aria-pressed', b.dataset.f === st.filter));
+    visible().forEach(i => {
+      const c = D.clips[i], o = outcome(c);
       const b = document.createElement('button'); b.type = 'button'; b.className = 'chip';
       b.setAttribute('aria-pressed', i === st.clip);
-      b.textContent = c.clip;
-      const s = document.createElement('small'); s.textContent = `${c.summary.frames_without_detections}/${c.summary.frames} empty`;
-      b.appendChild(s);
-      b.onclick = () => { st.clip = i; st.frame = 0; st.hl = -1; render(); };
+      b.append(document.createTextNode(c.clip));
+      if (o) { const tg = document.createElement('span'); tg.className = 'tag ' + o; tg.textContent = OUT_TEXT[o]; b.appendChild(tg); }
+      const code = document.createElement('span'); code.className = 'code';
+      code.textContent = c.truth && c.truth.labelled ? c.truth.wanted.join(', ') + ' @ ' + c.truth.label_t.map(t => t + 's').join(', ') : (c.truth ? 'clean clip' : 'no label');
+      b.appendChild(code);
+      b.onclick = () => { st.clip = i; st.frame = c.truth && c.truth.label_t.length ? nearestFrame(c, c.truth.label_t[0]) : 0; st.hl = -1; render(); };
       box.appendChild(b);
     });
   }
@@ -144,22 +186,36 @@ tr.hl td { background: var(--chip); }
 
   function render() {
     const c = D.clips[st.clip], f = c.frames[st.frame];
-    [...$('clips').children].forEach((b, i) => b.setAttribute('aria-pressed', i === st.clip));
+    clipButtons();
+    renderTruth(c, f);
     $('img').src = f.img; $('img').alt = `${c.clip} at ${f.actual_t.toFixed(2)} s`;
     $('hud').textContent = `${c.clip}  t=${f.actual_t.toFixed(2)}s  #${f.idx}`;
     $('pos').textContent = `frame ${st.frame + 1} / ${c.frames.length}`;
-    const dets = f.dets.map((d, i) => ({ ...d, i, rep: d.conf >= floorOf(d) })).filter(d => !st.hidden.has(d.cls));
+    const dets = f.dets.map((d, i) => ({ ...d, i, rep: !dropped(d) && d.conf >= floorOf(d) }))
+      .filter(d => !st.hidden.has(d.cls)).filter(d => st.raw || !dropped(d) || d.i === st.hl);
     $('emptyTag').hidden = f.dets.length > 0;
 
     // overlay
     const svg = $('ov'); svg.innerHTML = ''; svg.setAttribute('viewBox', `0 0 ${f.w} ${f.h}`);
+    const A = c.anchors || {}, P = c.provenance || {};
+    if (st.anchors) ['desk', 'machine', 'safe', 'laptop'].forEach(k => {
+      const b = A[k]; if (!b) return;
+      const prov = P[k] || '', explicit = prov.startsWith('explicit');
+      const col = explicit ? 'var(--c-hit)' : 'var(--c-fa)';
+      el('rect', { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1], fill: col, 'fill-opacity': .08, stroke: col, 'stroke-width': 3, 'stroke-dasharray': explicit ? 'none' : '10 5' }, svg);
+      const t = el('text', { x: b[0] + 4, y: b[3] - 5, fill: '#fff', stroke: '#000', 'stroke-width': 3, 'paint-order': 'stroke', 'font-size': 12, 'font-family': 'ui-monospace, Menlo, monospace' }, svg);
+      t.textContent = `${k.toUpperCase()} (${prov || 'unknown'})`;
+    });
     dets.slice().sort((a, b) => a.conf - b.conf).forEach(d => {
-      if (!d.rep && !st.weak && d.i !== st.hl) return;
-      const [x0, y0, x1, y1] = d.box, col = color(d.cls), hl = d.i === st.hl;
+      const drop = dropped(d);
+      if (!drop && !d.rep && !st.weak && d.i !== st.hl) return;
+      const [x0, y0, x1, y1] = d.box, hl = d.i === st.hl, col = drop ? '#9e9e9e' : color(d.cls);
       el('rect', { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: hl ? col : 'none', 'fill-opacity': hl ? .25 : 0, stroke: col,
-        'stroke-width': hl ? 3.5 : d.rep ? 2.5 : 1.2, 'stroke-dasharray': d.rep || hl ? 'none' : '6 4' }, svg);
-      if (d.rep || hl) {
-        const txt = `${d.cls} ${d.conf.toFixed(2)}`, w = txt.length * 6.2 + 8, ty = y0 > 16 ? y0 - 15 : y0;
+        'stroke-width': hl ? 3.5 : d.rep ? 2.5 : 1.2, 'stroke-dasharray': drop ? '2 3' : d.rep || hl ? 'none' : '6 4' }, svg);
+      const tracked = st.tracks && d.cls === 'person' && !drop;
+      if (d.rep || hl || tracked) {
+        const tid = d.cls === 'person' ? (d.track !== null && d.track !== undefined ? ` #${d.track}` : (d.reason || '').startsWith('untracked') ? ' untracked' : '') : '';
+        const txt = `${d.cls}${st.tracks ? tid : ''} ${d.conf.toFixed(2)}`, w = txt.length * 6.2 + 8, ty = y0 > 16 ? y0 - 15 : y0;
         el('rect', { x: x0, y: ty, width: w, height: 15, fill: col }, svg);
         const t = el('text', { x: x0 + 4, y: ty + 11, fill: '#000', 'font-size': 11, 'font-family': 'ui-monospace, Menlo, monospace' }, svg);
         t.textContent = txt;
@@ -199,18 +255,77 @@ tr.hl td { background: var(--chip); }
       const c3 = document.createElement('td'); c3.className = 'n';
       const bar = document.createElement('span'); bar.className = 'bar'; const fi = document.createElement('i'); fi.style.width = (d.conf * 100) + '%'; fi.style.background = color(d.cls);
       const mk = document.createElement('u'); mk.style.left = (floorOf(d) * 100) + '%'; bar.append(fi, mk); c3.append(bar, document.createTextNode(d.conf.toFixed(2)));
+      const cr = document.createElement('td'); cr.textContent = d.reason || '—';
+      const ct = document.createElement('td'); ct.className = 'n'; ct.textContent = d.track !== null && d.track !== undefined ? '#' + d.track : '—';
       const c4 = document.createElement('td'); c4.className = 'n'; c4.textContent = fmtBox(d.box);
       const c5 = document.createElement('td'); c5.className = 'n'; c5.textContent = fmtBox(d.obox);
-      tr.append(c1, c2, c3, c4, c5);
+      tr.append(c1, c2, c3, cr, ct, c4, c5);
       tr.onmouseenter = () => { st.hl = d.i; render(); };
       tr.onmouseleave = () => { st.hl = -1; render(); };
       tb.appendChild(tr);
     });
-    if (!dets.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 5; td.textContent = f.dets.length ? 'All boxes in this frame are hidden by the class filter.' : 'The detector returned no boxes for this frame.'; tr.appendChild(td); tb.appendChild(tr); }
+    if (!dets.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 7; td.textContent = f.dets.length ? 'All boxes in this frame are hidden by the class filter.' : 'The detector returned no boxes for this frame.'; tr.appendChild(td); tb.appendChild(tr); }
 
     $('objOut').textContent = st.obj.toFixed(2); $('perOut').textContent = st.per.toFixed(2);
     $('objMin').value = st.obj; $('perMin').value = st.per; $('showWeak').checked = st.weak;
+    $('lyRaw').checked = st.raw; $('lyTracks').checked = st.tracks; $('lyAnchors').checked = st.anchors;
+    renderReasons(c);
   }
+
+  function renderTruth(c, f) {
+    const box = $('truth'); box.innerHTML = '';
+    const t = c.truth;
+    const line = (k, parts) => { const d = document.createElement('div'); d.className = 'line'; const kk = document.createElement('span'); kk.className = 'k'; kk.textContent = k; d.appendChild(kk); parts.forEach(p => d.appendChild(p)); box.appendChild(d); };
+    const txt = (s) => document.createTextNode(s);
+    const jump = (time, label, cls) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'jump ' + cls; b.textContent = `${label} @ ${time.toFixed(1)}s`; b.onclick = () => { st.frame = nearestFrame(c, time); st.hl = -1; render(); }; return b; };
+    if (!t) { line('Label', [txt('No label found for this clip in ' + (D.run.report || 'the report'))]); }
+    else {
+      line('True', t.labelled ? t.wanted.map((code, i) => jump(t.label_t[i] ?? t.label_t[0] ?? 0, code, 'true')) : [txt('clean clip (no violation)')]);
+      line('Engine', t.predicted.length ? t.predicted.map(([pt, code]) => jump(pt, code, 'pred')) : [txt('no alert')]);
+      const o = outcome(c); const tg = document.createElement('span'); tg.className = 'tag ' + o; tg.style.marginLeft = '0'; tg.textContent = OUT_TEXT[o];
+      line('Result', [tg]);
+    }
+    // timeline
+    const svg = $('tl'); svg.innerHTML = ''; const W = 1000, H = 46, dur = Math.max(c.duration || 0, ...c.frames.map(fr => fr.actual_t), 1);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio', 'none');
+    const x = (tt) => 6 + (W - 12) * tt / dur;
+    el('rect', { x: 6, y: 20, width: W - 12, height: 6, rx: 3, fill: 'var(--chip)' }, svg);
+    c.frames.forEach(fr => { if (!fr.dets.length) el('rect', { x: x(fr.actual_t) - 2, y: 20, width: 4, height: 6, fill: 'var(--warn)' }, svg); });
+    if (t) {
+      t.label_t.forEach((lt, i) => { el('rect', { x: x(lt) - 3, y: 4, width: 6, height: 16, fill: 'var(--c-true)' }, svg);
+        const tx = el('text', { x: x(lt) + 5, y: 14, 'font-size': 11, fill: 'var(--c-true)', 'font-family': 'ui-monospace, Menlo, monospace' }, svg); tx.textContent = t.wanted[i] || t.wanted[0] || ''; });
+      t.predicted.forEach(([pt, code]) => { el('rect', { x: x(pt) - 3, y: 26, width: 6, height: 16, fill: 'var(--c-pred)' }, svg);
+        const tx = el('text', { x: x(pt) + 5, y: 40, 'font-size': 11, fill: 'var(--c-pred)', 'font-family': 'ui-monospace, Menlo, monospace' }, svg); tx.textContent = code; });
+    }
+    el('line', { x1: x(f.actual_t), x2: x(f.actual_t), y1: 0, y2: H, stroke: 'var(--fg)', 'stroke-width': 2 }, svg);
+    svg.onclick = (e) => { const r = svg.getBoundingClientRect(); const tt = ((e.clientX - r.left) / r.width * W - 6) / (W - 12) * dur; st.frame = nearestFrame(c, tt); st.hl = -1; render(); };
+    // near-label badge on the frame
+    const near = $('near'); near.hidden = true;
+    if (t && t.labelled) {
+      const d = t.label_t.map((lt, i) => [lt - f.actual_t, t.wanted[i] || t.wanted[0]]).sort((a, b) => Math.abs(a[0]) - Math.abs(b[0]))[0];
+      if (d && Math.abs(d[0]) <= 3) { near.hidden = false; near.textContent = Math.abs(d[0]) < 0.5 ? `labelled ${d[1]} now` : `labelled ${d[1]} ${d[0] > 0 ? 'in' : ''} ${Math.abs(d[0]).toFixed(1)}s${d[0] < 0 ? ' ago' : ''}`; }
+    }
+  }
+
+  function renderReasons(c) {
+    const box = $('reasons'); box.innerHTML = '';
+    const section = (title, obj, fmt) => {
+      if (!obj || !Object.keys(obj).length) return;
+      const h = document.createElement('h3'); h.textContent = title; box.appendChild(h);
+      Object.entries(obj).forEach(([k, v]) => { const d = document.createElement('div'); const a = document.createElement('span'); a.textContent = k;
+        const b = document.createElement('b'); b.textContent = fmt ? fmt(v) : v; if (fmt) b.className = String(v).startsWith('explicit') ? 'prov-explicit' : 'prov-proxy'; d.append(a, b); box.appendChild(d); });
+    };
+    section('Scene anchors (explicit = fine-tuned class, proxy = geometry / look-alike)', c.provenance, v => v || 'not found');
+    section('People, all engine frames (Facts.person_log)', c.summary.person_log_all_frames);
+    section('Boxes on displayed frames, by reason', c.summary.reasons_on_displayed_frames);
+    if (!box.children.length) { const d = document.createElement('div'); d.textContent = 'Run without --detector-only to see reasons, tracks and anchors.'; box.appendChild(d); }
+  }
+
+  $('lyRaw').onchange = e => { st.raw = e.target.checked; render(); };
+  $('lyTracks').onchange = e => { st.tracks = e.target.checked; render(); };
+  $('lyAnchors').onchange = e => { st.anchors = e.target.checked; render(); };
+
+  [...$('filter').children].forEach(b => b.onclick = () => { st.filter = b.dataset.f; const v = visible(); if (v.length && !v.includes(st.clip)) { st.clip = v[0]; st.frame = 0; } render(); });
 
   $('objMin').oninput = e => { st.obj = Number(e.target.value); render(); };
   $('perMin').oninput = e => { st.per = Number(e.target.value); render(); };
@@ -220,9 +335,9 @@ tr.hl td { background: var(--chip); }
   $('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
   document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowLeft') step(-1); if (e.key === 'ArrowRight') step(1); });
   $('note').textContent = `Boxes are the detector's own output (no tracking, no scene logic). Solid = at or above the cutoff the engine uses (objects ${D.run.obj_min}, people ${D.run.person_min}); dashed = between 0.25 and the cutoff. ` +
-    `Kept classes: ${D.run.kept_classes.join(', ')}. A box here is a detection, not proof of a violation.`;
+    `Grey dotted = dropped by the engine (see Reason). Anchor boxes: green solid = explicit class, amber dashed = proxy (a location estimate, not proof of what the object is). Kept classes: ${D.run.kept_classes.join(', ')}. True labels and engine alerts come from ${D.run.report || 'no report'}. A box here is a detection, not proof of a violation.`;
 
-  clipButtons(); classToggles(); render();
+  classToggles(); render();
 })();
 </script>
 </body>

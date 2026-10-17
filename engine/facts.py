@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from engine.scene import Scene, build_scene, foot_point, in_room_mask
+from engine.scene import Scene, build_scene, foot_point, in_room_mask, person_filter_reasons
 
 SMOOTH_S = 1.0  # TUNE: window for the smoothed head count
 
@@ -21,6 +21,7 @@ class Facts:
     video: str | None = None           # source video (for rules that look at pixels)
     perc: object | None = None         # perception result (times, info, raw detections)
     scan: pd.DataFrame | None = None   # VLM desk-scan flags per sampled frame (if run)
+    person_log: pd.DataFrame | None = None  # every candidate person box + why it was (not) counted
 
 
 def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:
@@ -33,7 +34,12 @@ def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:
 
 STITCH_GAP_S = 1.5   # TUNE: max time between one track ending and the next starting
 STITCH_DIST_H = 0.6  # TUNE: max foot distance, in person heights
-MAX_PERSONS = 3      # TUNE: most people counted in the room per frame (keeps the most confident)
+MAX_PERSONS: int | None = 3  # TUNE: most people counted per frame (most confident kept); None = no cap
+# Count person boxes the detector saw but ByteTrack did not return (new or weak tracks).
+# Off by default; double counting is prevented by the IoU match in perception and by the
+# duplicate filter (person_filter_reasons).
+COUNT_UNTRACKED = False
+UNTRACKED_ID_BASE = -100000  # synthetic track ids for untracked boxes: base - row number
 
 
 def stitch_tracks(room: pd.DataFrame, h_ref: float) -> pd.DataFrame:
@@ -68,9 +74,10 @@ def stitch_tracks(room: pd.DataFrame, h_ref: float) -> pd.DataFrame:
     return room
 
 
-def cap_per_frame(room: pd.DataFrame, n: int = MAX_PERSONS) -> pd.DataFrame:
-    """Keep at most n people per frame, the most confident ones."""
-    if room.empty or n <= 0:
+def cap_per_frame(room: pd.DataFrame, n: int | None = None) -> pd.DataFrame:
+    """Keep at most n people per frame (default MAX_PERSONS), the most confident ones."""
+    n = MAX_PERSONS if n is None else n
+    if room.empty or n is None or n <= 0:
         return room
     return room.sort_values("conf", ascending=False).groupby("t", sort=False).head(n).sort_index()
 
@@ -79,9 +86,16 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
           video: str | None = None, perc=None) -> Facts:
     n_frames = len(np.unique(np.asarray(times, dtype=float))) if len(times) else None
     scene = build_scene(df, frame_w, frame_h, n_frames)
-    persons = df[df.kind == "person"].copy()
-    from engine.scene import clean_persons
-    persons = clean_persons(persons, scene.person_h_ref).copy()
+    tracked = df[df.kind == "person"]
+    raw = df[df.kind == "person_raw"] if "kind" in df else df.iloc[0:0]
+    untracked = raw[raw.track_id < 0]
+    cand = tracked
+    if COUNT_UNTRACKED and len(untracked):
+        u = untracked.assign(track_id=UNTRACKED_ID_BASE - np.arange(len(untracked)), kind="person")
+        cand = pd.concat([tracked, u])
+    cand = cand.reset_index(drop=True)
+    reasons = pd.Series(person_filter_reasons(cand, scene.person_h_ref), index=cand.index, dtype=object)
+    persons = cand[reasons.isna()].copy()
     if len(persons):
         persons["in_room"] = in_room_mask(persons, scene)
         feet = np.array([foot_point(r) for r in persons.itertuples()])
@@ -92,7 +106,19 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
                                  fy=pd.Series(dtype=float))
     room = persons[persons["in_room"].astype(bool)].copy()
     room = stitch_tracks(room, scene.person_h_ref)
+    before_cap = room.index
     room = cap_per_frame(room)
+
+    # Why each candidate box was or was not counted (for inspection; rules do not read this).
+    reasons = reasons.copy()
+    reasons[persons.index[~persons["in_room"].astype(bool).to_numpy()]] = "outside room (behind glass)"
+    reasons[before_cap.difference(room.index)] = "over per-frame cap"
+    reasons[room.index] = "counted"
+    log = cand[["t", "track_id", "conf", "x0", "y0", "x1", "y1"]].assign(
+        source=np.where(cand.track_id.to_numpy() <= UNTRACKED_ID_BASE, "untracked", "tracked"), reason=reasons)
+    if not COUNT_UNTRACKED and len(untracked):
+        log = pd.concat([log, untracked[["t", "track_id", "conf", "x0", "y0", "x1", "y1"]].assign(
+            source="untracked", reason="untracked (not counted)")], ignore_index=True)
 
     # Cashier seat: the in-room track present longest; its median foot point.
     seat = None
@@ -121,4 +147,4 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
     obj = df[df.kind == "obj"]
     if "confident" in obj:
         obj = obj[obj.confident]  # weaker boxes only feed scene anchors
-    return Facts(scene, room, frames, obj.copy(), seat, video, perc)
+    return Facts(scene, room, frames, obj.copy(), seat, video, perc, person_log=log)

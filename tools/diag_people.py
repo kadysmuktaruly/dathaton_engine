@@ -11,7 +11,7 @@ if __name__ == "__main__":
     for c in load_clips():
         if want and c.clip_id not in want:
             continue
-        cp = perception._cache_path(c.path, 3.0)
+        cp = perception._cache_path(c.path, 3.0, perception.probe(str(c.path)).crop)
         if not cp.exists():
             continue
         p = perception.run(c.path)

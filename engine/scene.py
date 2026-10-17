@@ -63,6 +63,10 @@ class Scene:
     person_h_ref: float = 0.0          # typical in-room standing/seated person height
     notes: list[str] = field(default_factory=list)
     back_line: float | None = None     # image y of the desk's far edge (depth reference)
+    # Where each anchor came from: 'explicit:<class>' (a fine-tuned class for that object) or
+    # 'proxy:<how>' (geometry / stock look-alikes). A proxy is a location estimate only, never
+    # proof of what the equipment is or whether a safe is open.
+    provenance: dict = field(default_factory=dict)
 
     @property
     def scale(self) -> float:
@@ -175,6 +179,7 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int, n_frames: int | No
         hull = Box(min(b.x0 for b in devs), min(b.y0 for b in devs), max(b.x1 for b in devs), max(b.y1 for b in devs))
     # Desk = hull united with table detections that mostly overlap it.
     desk = hull
+    prov = {"desk": "proxy:devices" if hull is not None else None, "machine": None, "safe": None}
     notes = []
     tables = [Box(r.x0, r.y0, r.x1, r.y1) for r in cl[cl.role == "table"].itertuples()]
     if hull is not None:
@@ -184,11 +189,13 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int, n_frames: int | No
             # merge tables that mostly overlap the hull, or that cover most of a small hull
             if ix * iy >= 0.3 * b.w * b.h or (ix * iy >= 0.6 * hull.w * hull.h and b.y1 < 0.95 * frame_h):
                 desk = Box(min(desk.x0, b.x0), min(desk.y0, b.y0), max(desk.x1, b.x1), max(desk.y1, b.y1))
+                prov["desk"] = "proxy:devices+table"
     elif tables:
         def act_t(b):
             return float(np.mean([b.contains(x, y) for x, y in wrists])) if len(wrists) else 0.0
         desk = max([b for b in tables if b.y1 < 0.95 * frame_h] or tables, key=act_t)
         notes.append("no stable devices; desk from table detections")
+        prov["desk"] = "proxy:table"
     elif _best(cl, "desk") is None:
         notes.append("desk not found")
     # Explicit (fine-tuned) desk / counting_machine / safe boxes win over the look-alike logic.
@@ -196,22 +203,27 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int, n_frames: int | No
     if explicit_desk is not None:
         desk = explicit_desk
         notes.append("desk from desk detections")
+        prov["desk"] = "explicit:desk"
 
     machine = _best(cl, "counting_machine")
     if machine is not None:
         notes.append("machine from counting_machine detections")
+        prov["machine"] = "explicit:counting_machine"
     elif desk is not None:
         cands = [b for b in devs if laptop is None or iou(b, laptop) < 0.3]
         if cands:
             machine = max(cands, key=lambda b: b.w * b.h)
+            prov["machine"] = "proxy:tv/suitcase"
     safe = _best(cl, "safe")  # built from safe and safe_open boxes
     if safe is not None:
         notes.append("safe from safe detections")
+        prov["safe"] = "explicit:safe"
     elif tall and desk is not None:
         near = [b for b in tall if np.hypot(b.cx - desk.cx, b.cy - desk.cy) < 1.2 * desk.w]
         if near:
             safe = max(near, key=lambda b: b.w * b.h)
             notes.append("safe guessed from a tall stable box")
+            prov["safe"] = "proxy:tall box"
     # Back edge of the desk surface: devices stand on it, so it lies a bit above their bottoms.
     back_line = None
     if devs:
@@ -221,7 +233,7 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int, n_frames: int | No
 
     hs = (persons.y1 - persons.y0).to_numpy()
     person_h_ref = float(np.percentile(hs, 75)) if len(hs) else frame_h * 0.3
-    return Scene(frame_w, frame_h, desk, laptop, machine, safe, person_h_ref, notes, back_line)
+    return Scene(frame_w, frame_h, desk, laptop, machine, safe, person_h_ref, notes, back_line, prov)
 
 
 def in_room_mask(persons: pd.DataFrame, scene: Scene) -> np.ndarray:
@@ -248,25 +260,37 @@ def _contain(a, b) -> float:
     return ix * iy / area
 
 
+def person_filter_reasons(persons: pd.DataFrame, h_ref: float) -> list[str | None]:
+    """Why each person box is dropped before counting (None = kept): 'tiny box' (hands,
+    fragments), 'group box' (one box spanning 2+ people), 'duplicate' (mostly inside a more
+    confident box)."""
+    n = len(persons)
+    if n == 0:
+        return []
+    reason: list[str | None] = [None] * n
+    h = (persons.y1 - persons.y0).to_numpy()
+    for i in np.where(h < 0.3 * h_ref)[0]:  # TUNE
+        reason[i] = "tiny box"
+    boxes = persons[["x0", "y0", "x1", "y1"]].to_numpy()
+    conf = persons.conf.to_numpy()
+    for t, g in persons.groupby("t").indices.items():
+        g = [i for i in g if reason[i] is None]
+        for i in g:
+            inside = [j for j in g if j != i and reason[j] is None and _contain(boxes[i], boxes[j]) > 0.8]
+            if len(inside) >= 2:
+                reason[i] = "group box"
+        g = [i for i in g if reason[i] is None]
+        for i in g:
+            for j in g:
+                if i != j and reason[i] is None and reason[j] is None and _contain(boxes[j], boxes[i]) > 0.75 \
+                        and conf[i] <= conf[j]:
+                    reason[i] = "duplicate"
+    return reason
+
+
 def clean_persons(persons: pd.DataFrame, h_ref: float) -> pd.DataFrame:
     """Drop tiny boxes (hands, fragments), group boxes spanning 2+ people, and near-duplicates."""
     if persons.empty:
         return persons
-    keep = np.ones(len(persons), bool)
-    h = (persons.y1 - persons.y0).to_numpy()
-    keep &= h >= 0.3 * h_ref  # TUNE
-    idx = np.arange(len(persons))
-    boxes = persons[["x0", "y0", "x1", "y1"]].to_numpy()
-    conf = persons.conf.to_numpy()
-    for t, g in persons.groupby("t").indices.items():
-        g = [i for i in g if keep[i]]
-        for i in g:
-            inside = [j for j in g if j != i and keep[j] and _contain(boxes[i], boxes[j]) > 0.8]
-            if len(inside) >= 2:
-                keep[i] = False  # group box
-        g = [i for i in g if keep[i]]
-        for i in g:
-            for j in g:
-                if i != j and keep[i] and keep[j] and _contain(boxes[j], boxes[i]) > 0.75 and conf[i] <= conf[j]:
-                    keep[i] = False  # mostly inside a more confident box
+    keep = np.array([r is None for r in person_filter_reasons(persons, h_ref)], bool)
     return persons[keep]

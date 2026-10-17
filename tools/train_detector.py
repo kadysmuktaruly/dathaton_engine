@@ -1,7 +1,7 @@
 """Fine-tune RT-DETRv2-R18 (PekingU/rtdetr_v2_r18vd, Apache-2.0) on the labeled cash-room frames.
 
 Classes: tools/det_classes.CLASSES = 6 new classes (cash, safe, safe_open, counting_machine,
-collection_bag, desk) + 6 COCO classes we still need (person, laptop, handbag, backpack, cell phone, cup).
+collection_bag, desk) + 6 COCO classes we still need (person, laptop, handbag, backpack, id_card, cup).
 All 12 are annotated in Label Studio (the COCO ones are pre-filled by the stock model and only checked),
 so a single fine-tuned model replaces the stock one. The classifier rows of the COCO classes are
 copied from the stock COCO head, so they start from the stock detector's ability; the new rows start

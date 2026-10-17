@@ -1,7 +1,10 @@
 """Frame-level perception: RT-DETRv2 objects, ByteTrack person tracks, RTMPose keypoints.
 
 Output is one table with a row per detection:
-  t, frame_idx, kind ('obj' | 'person'), cls, conf, x0, y0, x1, y1, track_id, kps (17x3 flat, persons only)
+  t, frame_idx, kind, cls, conf, x0, y0, x1, y1, track_id, kps (17x3 flat, tracked persons only)
+kind: 'obj' (objects), 'person' (ByteTrack output: identity over time, with pose), 'person_raw'
+(every person box the detector returned; track_id = the tracked box it matches by IoU, else -1).
+Raw rows keep people that tracking dropped or has not confirmed yet visible downstream.
 Coordinates are in the cropped frame's pixels. Results are cached per (video md5, settings,
 detector). The detector is the stock COCO model unless ENGINE_DETECTOR_PATH names a local
 fine-tuned checkpoint (see config.detector_source).
@@ -10,6 +13,7 @@ from __future__ import annotations
 
 import glob
 import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -44,14 +48,20 @@ def filter_detections(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.assign(role=df.cls.map(role_map()))  # `cls` stays as detected (e.g. safe_open vs safe)
     df = df[df.role.notna()]
-    is_p = df.kind == "person"
+    is_p = df.kind.isin(["person", "person_raw"])
     keep = (is_p & (df.conf >= PERSON_MIN)) | (~is_p & (df.conf >= CANDIDATE_MIN))
     df = df[keep]
-    df = df.assign(confident=(df.kind == "person") | (df.conf >= OBJ_MIN))
+    df = df.assign(confident=df.kind.isin(["person", "person_raw"]) | (df.conf >= OBJ_MIN))
     return df.reset_index(drop=True)
 
 
 POSE_BATCH_MIN_H = 30  # px; skip pose for tiny boxes
+POSE_INPUT = (192, 256)
+# ByteTrack settings (part of the cache key). lost_track_buffer is in seconds here.
+TRACKER = {"lost_track_buffer_s": 4.0, "track_activation_threshold": 0.3,  # TUNE
+           "minimum_matching_threshold": 0.8}
+RAW_MATCH_IOU = 0.5    # a raw person box belongs to the tracked box it overlaps this much
+SCHEMA_VERSION = "v3"  # v3: person_raw rows, context classes kept
 MIN_BOX_PX = 2.0       # boxes thinner than this after clipping are dropped
 
 
@@ -103,7 +113,7 @@ class Models:
             onnx = glob.glob(str(config.WEIGHTS_DIR / "rtmpose" / "**" / "end2end.onnx"), recursive=True)
             if not onnx:
                 raise FileNotFoundError("RTMPose weights missing: run `python -m tools.download_weights`")
-            self.pose = RTMPose(onnx[0], model_input_size=(192, 256), backend="onnxruntime", device="cpu")
+            self.pose = RTMPose(onnx[0], model_input_size=POSE_INPUT, backend="onnxruntime", device="cpu")
 
     def detect(self, frames_rgb: list[np.ndarray]) -> list[list[tuple[str, float, np.ndarray]]]:
         torch = self.torch
@@ -126,22 +136,54 @@ class Models:
         return batch
 
 
-def cache_key(video_md5: str, fps: float, fingerprint: str, thresh: float = DET_THRESH) -> str:
-    """Stock detector at the default threshold keeps the old key (existing caches stay valid);
-    any other detector or threshold gets its own cache."""
-    key = f"{video_md5[:16]}_fps{fps:g}_v2"
-    if fingerprint != "stock" or thresh != 0.25:
-        key += f"_d{fingerprint[:10]}_th{thresh:g}"
-    return key
+def pose_signature() -> str:
+    onnx = sorted(glob.glob(str(config.WEIGHTS_DIR / "rtmpose" / "**" / "end2end.onnx"), recursive=True))
+    if not onnx:
+        return "none"
+    return f"{Path(onnx[0]).parent.name}:{Path(onnx[0]).stat().st_size}"
 
 
-def _cache_path(video: Path, fps: float) -> Path:
+def perception_settings(fps: float, crop, fingerprint: str | None = None, pose_sig: str | None = None) -> dict:
+    """Everything that changes the cached table besides the video itself."""
+    return {
+        "schema": SCHEMA_VERSION, "fps": float(fps), "crop": [int(v) for v in crop],
+        "detector": fingerprint if fingerprint is not None else config.detector_fingerprint(),
+        "det_thresh": DET_THRESH, "classes": sorted(set().union(*ROLES.values())),
+        "tracker": {**TRACKER, "frame_rate": int(round(fps))}, "raw_match_iou": RAW_MATCH_IOU,
+        "pose": {"model": pose_sig if pose_sig is not None else pose_signature(),
+                 "input": list(POSE_INPUT), "min_h": POSE_BATCH_MIN_H},
+    }
+
+
+def cache_key(video_md5: str, settings: dict) -> str:
+    h = hashlib.sha1(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:12]
+    return f"{video_md5[:16]}_{settings['schema']}_{h}"
+
+
+def _cache_path(video: Path, fps: float, crop) -> Path:
     h = hashlib.md5()
     with open(video, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    key = cache_key(h.hexdigest(), fps, config.detector_fingerprint())
+    key = cache_key(h.hexdigest(), perception_settings(fps, crop))
     return config.CACHE_DIR / "perception" / f"{key}.parquet"
+
+
+def match_raw_to_tracks(raw_boxes: np.ndarray, tracked_boxes: np.ndarray, tracked_ids) -> list[int]:
+    """Track id of the tracked box each raw person box overlaps by >= RAW_MATCH_IOU, else -1."""
+    out = []
+    for b in raw_boxes:
+        best, best_iou = -1, RAW_MATCH_IOU
+        for tb, tid in zip(tracked_boxes, tracked_ids):
+            ix = max(0.0, min(b[2], tb[2]) - max(b[0], tb[0]))
+            iy = max(0.0, min(b[3], tb[3]) - max(b[1], tb[1]))
+            inter = ix * iy
+            union = (b[2] - b[0]) * (b[3] - b[1]) + (tb[2] - tb[0]) * (tb[3] - tb[1]) - inter
+            iou = inter / union if union > 0 else 0.0
+            if iou >= best_iou:
+                best, best_iou = int(tid), iou
+        out.append(best)
+    return out
 
 
 def run(video: str | Path, models: Models | None = None, fps: float = config.SAMPLE_FPS,
@@ -152,7 +194,7 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
     video = Path(video)
     info = probe(str(video))
     times = sample_times(info.duration, fps)
-    cache = _cache_path(video, fps)
+    cache = _cache_path(video, fps, info.crop)
     tcache = cache.with_suffix(".times.npy")
     use_cache = config.USE_CACHE if use_cache is None else use_cache
     fw, fh = info.crop[2] - info.crop[0], info.crop[3] - info.crop[1]
@@ -165,8 +207,9 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
                           {"cached": True}, config.detector_labels())
 
     models = models or Models()
-    tracker = sv.ByteTrack(frame_rate=int(round(fps)), lost_track_buffer=int(4 * fps),  # TUNE
-                           track_activation_threshold=0.3, minimum_matching_threshold=0.8)
+    tracker = sv.ByteTrack(frame_rate=int(round(fps)), lost_track_buffer=int(TRACKER["lost_track_buffer_s"] * fps),
+                           track_activation_threshold=TRACKER["track_activation_threshold"],
+                           minimum_matching_threshold=TRACKER["minimum_matching_threshold"])
     rows = []
     t_det = t_pose = t_dec = 0.0
     buf: list[tuple[int, float, np.ndarray]] = []
@@ -205,6 +248,11 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
                 b = tracked.xyxy[i]
                 rows.append((t, fi, "person", PERSON, float(tracked.confidence[i]), *map(float, b),
                              int(tracked.tracker_id[i]), kps[i]))
+            if persons:
+                raw = np.array([b for _, b in persons], dtype=np.float32)
+                tids = match_raw_to_tracks(raw, tracked.xyxy, tracked.tracker_id if len(tracked) else [])
+                for (c, b), tid in zip(persons, tids):
+                    rows.append((t, fi, "person_raw", PERSON, float(c), *map(float, b), tid, None))
         buf.clear()
 
     actual: list[float] = []

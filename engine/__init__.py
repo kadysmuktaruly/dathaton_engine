@@ -167,7 +167,7 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
                      "laptop": fa.scene.laptop and fa.scene.laptop.as_list(),
                      "machine": fa.scene.machine and fa.scene.machine.as_list(),
                      "safe": fa.scene.safe and fa.scene.safe.as_list(),
-                     "seat": fa.seat, "notes": fa.scene.notes},
+                     "seat": fa.seat, "notes": fa.scene.notes, "provenance": fa.scene.provenance},
            "events": debug_events,
            "dropped": [{"code": e.code, "start": e.start, "score": e.score, "info": e.info}
                        for e in events if e not in kept]}

@@ -9,7 +9,7 @@ import pytest
 
 from engine import config
 from engine.classes import CLASSES, IGNORED, NEW_CLASSES, role_of, runtime_keep
-from engine.perception import cache_key, clip_box, filter_detections
+from engine.perception import cache_key, clip_box, filter_detections  # noqa: F401
 from engine.rules import b5
 from engine.scene import build_scene
 from tools.inspect_detections import frame_rows, to_original
@@ -132,10 +132,13 @@ def test_frames_without_detections_count_against_stability():
 # --- cache keys -----------------------------------------------------------------------------
 
 def test_perception_cache_key():
+    from engine.perception import perception_settings
     md5 = "a" * 32
-    assert cache_key(md5, 3.0, "stock") == "aaaaaaaaaaaaaaaa_fps3_v2"          # old caches stay valid
-    assert cache_key(md5, 3.0, "f" * 40) != cache_key(md5, 3.0, "e" * 40)
-    assert cache_key(md5, 3.0, "stock", thresh=0.3) != cache_key(md5, 3.0, "stock")
+    base = perception_settings(3.0, (0, 0, 464, 848), fingerprint="stock", pose_sig="m:1")
+    assert cache_key(md5, base) == cache_key(md5, perception_settings(3.0, (0, 0, 464, 848), "stock", "m:1"))
+    assert cache_key(md5, base) != cache_key(md5, perception_settings(3.0, (0, 0, 464, 848), "f" * 40, "m:1"))
+    assert cache_key(md5, base) != cache_key(md5, perception_settings(3.0, (12, 0, 476, 848), "stock", "m:1"))
+    assert cache_key(md5, base) != cache_key(md5, perception_settings(3.0, (0, 0, 464, 848), "stock", "m:2"))
 
 
 def test_scan_cache_key_changes_with_crop():
@@ -207,6 +210,6 @@ def test_loaded_detector_must_match_selection(monkeypatch, tmp_path):
     from engine import perception
     monkeypatch.setenv("ENGINE_DETECTOR_PATH", str(_ckpt(tmp_path)))
     monkeypatch.setattr(perception, "probe", lambda v: SimpleNamespace(duration=1.0, crop=(0, 0, 464, 848)))
-    monkeypatch.setattr(perception, "_cache_path", lambda v, fps: tmp_path / "x.parquet")
+    monkeypatch.setattr(perception, "_cache_path", lambda v, fps, crop: tmp_path / "x.parquet")
     with pytest.raises(ValueError, match="ENGINE_DETECTOR_PATH changed"):
         perception.run("video.mov", models=SimpleNamespace(source=config.DETECTOR_REPO))
