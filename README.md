@@ -51,3 +51,14 @@ video → bar crop → 3 fps sampling with exact timestamps
 
 ## Reports
 `reports/dataset_review.md` (types per clip, confirmed by the user), `reports/perception_baseline.md`, `reports/step3_gate.md`, `reports/eval_*.md`.
+
+## HTTP API (Step 7)
+```bash
+ENGINE_API_KEY=<secret> HF_HUB_OFFLINE=1 uv run uvicorn api.main:app --port 8000
+curl -H "X-API-Key: <secret>" -F "file=@videos/X-1.mov" localhost:8000/api/v1/analyze   # -> {"job_id": ...}
+curl -H "X-API-Key: <secret>" localhost:8000/api/v1/jobs/<job_id>                      # -> status + result
+```
+- No or wrong `X-API-Key` → 401. If `ENGINE_API_KEY` is unset, a random key is generated and printed at startup.
+- One sequential worker; models load once at startup (~5 s).
+- Jobs answer `processing` → `done` | `failed`. If a job runs past `ENGINE_DEADLINE_S` (default 240 s), the best result so far is returned: the rules-only result built before the VLM stage. The VLM stage is also skipped when the deadline is near.
+- `ENGINE_NO_CACHE=1` disables the perception/scan caches (for cold timings).

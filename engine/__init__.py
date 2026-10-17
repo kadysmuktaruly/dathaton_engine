@@ -87,43 +87,12 @@ def _add_cashier_boxes(fa, ev):
             ev.boxes.setdefault(t, []).append(("кассир", [r.x0, r.y0, r.x1, r.y1]))
 
 
-def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = True,
-            debug_dir: str | Path | None = None, models=None) -> dict:
-    from engine import catalog, config, evidence, output, perception
-
-    job_id = job_id or uuid.uuid4().hex[:12]
-    video_path = str(video_path)
-    T = {}
-    t0 = time.time()
-    perc = perception.run(video_path, models=models or _get_models())
-    T["perception_s"] = round(time.time() - t0, 2)
+def _build(job_id, video_path, perc, fa, events):
+    """Kept events -> graded JSON (+ debug event list)."""
+    from engine import catalog, evidence, output
     crop = perc.info.crop
-    fw, fh = crop[2] - crop[0], crop[3] - crop[1]
-
-    budget = None
-    if use_vlm:
-        from engine import vlm
-        budget = vlm.Budget(VLM_BUDGET_S)
-    t0 = time.time()
-    fa, events, rule_t = detect_events(perc, fw, fh, video_path, budget)
-    T["rules_s"] = round(time.time() - t0 - rule_t.get("scan", 0.0), 2)
-    T["vlm_s"] = rule_t.get("scan", 0.0)
-    if use_vlm and events and budget.ok(3.0):
-        from engine import vlm
-        t0 = time.time()
-        events = vlm.verify(video_path, perc, fa, events, budget)
-        T["vlm_s"] = round(T["vlm_s"] + time.time() - t0, 2)
-    if budget is not None:
-        T["vlm_budget_left_s"] = round(budget.left(), 1)
-        try:
-            import mlx.core as mx
-            T["mlx_peak_gb"] = round(mx.get_peak_memory() / 1e9, 2)
-        except Exception:
-            pass
-
     kept = [e for e in events if e.score >= VERDICT_THRESHOLD]
     violations, debug_events = [], []
-    t0 = time.time()
     for ev in kept:
         tc = round(ev.start, 1)
         dur = perc.info.duration
@@ -140,8 +109,55 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
         debug_events.append({"code": ev.code, "start": ev.start, "end": ev.end, "score": ev.score,
                              "refs": [f"{r['doc']} {r['point']}" for r in catalog.safe_refs(ev.code)],
                              "info": {k: v for k, v in ev.info.items() if k != "seen"}})
+    return output.build(job_id, violations), kept, debug_events
+
+
+def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = True,
+            debug_dir: str | Path | None = None, models=None, on_partial=None,
+            deadline: float | None = None) -> dict:
+    """Analyze one video. on_partial(result) is called with a complete rules-only result before
+    the VLM stage; `deadline` (epoch seconds) skips the VLM stage when time is short."""
+    from engine import config, perception
+
+    job_id = job_id or uuid.uuid4().hex[:12]
+    video_path = str(video_path)
+    T = {}
+    t0 = time.time()
+    perc = perception.run(video_path, models=models or _get_models())
+    T["perception_s"] = round(time.time() - t0, 2)
+    crop = perc.info.crop
+    fw, fh = crop[2] - crop[0], crop[3] - crop[1]
+
+    t0 = time.time()
+    fa, events, rule_t = detect_events(perc, fw, fh, video_path, None)
+    T["rules_s"] = round(time.time() - t0, 2)
+    if on_partial is not None:
+        on_partial(_build(job_id, video_path, perc, fa, events)[0])
+
+    vlm_budget = VLM_BUDGET_S
+    if deadline is not None:
+        vlm_budget = min(vlm_budget, deadline - time.time() - 15.0)
+    T["vlm_s"] = 0.0
+    if use_vlm and vlm_budget > 5.0:
+        from engine import vlm
+        budget = vlm.Budget(vlm_budget)
+        t0 = time.time()
+        fa, events, rule_t = detect_events(perc, fw, fh, video_path, budget)
+        if events and budget.ok(3.0):
+            events = vlm.verify(video_path, perc, fa, events, budget)
+        T["vlm_s"] = round(time.time() - t0, 2)
+        T["vlm_budget_left_s"] = round(budget.left(), 1)
+        try:
+            import mlx.core as mx
+            T["mlx_peak_gb"] = round(mx.get_peak_memory() / 1e9, 2)
+        except Exception:
+            pass
+    elif use_vlm:
+        T["vlm_skipped"] = "deadline"
+
+    t0 = time.time()
+    res, kept, debug_events = _build(job_id, video_path, perc, fa, events)
     T["evidence_s"] = round(time.time() - t0, 2)
-    res = output.build(job_id, violations)
 
     dbg = {"job_id": job_id, "video": video_path, "timings": T, "rule_timings": rule_t,
            "scene": {"desk": fa.scene.desk and fa.scene.desk.as_list(),
