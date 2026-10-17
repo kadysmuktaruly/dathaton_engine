@@ -8,3 +8,4 @@ runs/
 videos/
 *.mov
 label_studio_data/
+reports/sheets/
