@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+cache/
+weights/
+runs/
+videos/
+*.mov
+label_studio_data/

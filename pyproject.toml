@@ -1,0 +1,32 @@
+[project]
+name = "cashdesk-engine"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "torch>=2.5",
+  "torchvision",
+  "transformers>=4.47",
+  "timm",
+  "supervision>=0.25",
+  "rtmlib",
+  "onnxruntime",
+  "mlx-vlm",
+  "opencv-python-headless",
+  "numpy",
+  "pandas",
+  "pyarrow",
+  "pillow",
+  "openpyxl",
+  "fastapi",
+  "uvicorn",
+  "python-multipart",
+  "pytest",
+  "huggingface_hub",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
