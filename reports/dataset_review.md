@@ -63,3 +63,15 @@ Effects on the rules: opening the safe while a client is present is normal (X-35
 - COCO stock: `person`, `laptop`, `handbag`/`backpack`/`suitcase` (B3), `cup` (X-46), `cell phone`, `dining table` (desk; to be checked in Step 2).
 - Fine-tune candidates, if stock detection fails in Step 2: `cash` (notes and bundles; very small at 464 px, the main risk), `safe`, `safe_open` (door swung open), `counting_machine`, `collection_bag` (green sealed bag), `door_open` (the glass door, for entry/exit events).
 - Probably out of reach for a detector: a key in the safe lock. If LEAVE needs it, that type goes to the VLM fallback.
+
+## Confirmed by the user (2026-10-17)
+| Code | Clips | Implementation |
+|---|---|---|
+| B1 | X-4@57, X-15, X-26, X-38 | rule (cash on the desk with no cashier hand nearby, or cash lying open while a new person arrives) |
+| C1 | X-18, X-30, X-32, X-33 | rule (a new person enters and reaches the staff side, or the room is empty) |
+| B5 | X-20, X-11, X-22, X-24, X-28 | rule (safe open with nobody near it; or the cashier leaves the room alone after a session) + VLM check (key in lock / laptop left on) |
+| B7 | X-13, X-44 | rule (lone cashier with banknotes in hand at the desk for ≥ N s) + VLM confirmation that the notes are cash; X-14 must stay clean |
+| A1 | X-34 | rule (client leaves while cash is still at the machine or in the cashier's hands) |
+| D1 | X-17 | rule (collection bag appears on the desk and is moved off within a short time without a pause to inspect it) |
+| B3 | X-40 | rule (handbag/backpack/coat on the desk or staff side) |
+| A3 / A5 / A2 / X0 | X-1, X-2, X-4@68, X-46 (best guesses) | VLM catch-all / fallback only |
