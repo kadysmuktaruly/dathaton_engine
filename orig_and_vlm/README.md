@@ -25,14 +25,18 @@ Why not "video → text → LLM decides": see `TEXTFLOW_REPORT.md`.
 Baseline: `main`'s `reports/eval_B0_uncached.md`. This version: `reports/eval_ov_full2.md`. Times are from
 the cold run, `reports/eval_ov_full.md`; the second run reused cached scans.
 
-| | main (engine only) | orig_and_vlm |
-|---|---|---|
-| violation videos found (of 21) | 13 | **16** |
-| false alarms (of 19 clean) | 6 | **4** |
-| precision / recall / F1 | 0.684 / 0.619 / 0.65 | **0.80 / 0.762 / 0.78** |
-| right type (matched timecodes) | 0.923 | 0.824 (more hits, incl. unclear-type clips X-2, X-34) |
-| timecode within 1 s / median error | 0.54 / 1.0 s | 0.53 / 1.0 s |
-| seconds per clip, mean / max (cold) | 24 / 48 | 39 / 81 |
+| | pure vision (no VLM) | main (engine + Qwen3-VL) | orig_and_vlm |
+|---|---|---|---|
+| violation videos found (of 21) | 11 | 13 | **16** |
+| false alarms (of 19 clean) | 5 | 6 | **4** |
+| precision / recall / F1 | 0.688 / 0.524 / 0.595 | 0.684 / 0.619 / 0.65 | **0.80 / 0.762 / 0.78** |
+| right type (matched timecodes)* | 0.727 | 0.923 | 0.824 |
+| timecode within 1 s / median error | 0.55 / 1.0 s | 0.54 / 1.0 s | 0.53 / 1.0 s |
+| seconds per clip, mean / max (cold) | ~3–14 (perception only) | 24 / 48 | 39 / 81 |
+
+\* Type labels are being redone by hand (see PROGRESS.md), so this row is not reliable yet. Pure vision =
+`tools.eval --no-vlm` (`reports/eval_pure_vision.md`): perception + rules only, so B1 / B3 / D1 / X0 can't
+fire. It misses X-40 and X-46 on top of main's misses.
 
 - **Newly found:** X-4 (B1 at 55.3 s vs 57), X-17 (D1, exact), plus X-2 and X-34, flagged as B1 although the
   labeled types are unclear (A5 / A1).
