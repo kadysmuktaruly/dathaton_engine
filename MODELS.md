@@ -14,7 +14,7 @@ Licenses were checked on 2026-10-17 from the Hugging Face model card metadata (`
 |---|---|---|
 | torch | 2.14.1 | BSD-3-Clause family (see metadata) |
 | transformers | 5.20.1 | Apache-2.0 |
-| supervision (ByteTrack) | 0.31.0 | MIT |
+| supervision (ByteTrack) | 0.26.1 (pinned <0.27: later versions moved ByteTrack out) | MIT |
 | rtmlib | 0.0.16 | Apache-2.0 |
 | onnxruntime | 1.31.0 | MIT |
 | mlx / mlx-vlm | 0.32.4 / 0.7.8 | MIT |
