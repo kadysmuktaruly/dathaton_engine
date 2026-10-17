@@ -68,7 +68,8 @@ def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, bu
 def _resolve(events):
     """B1 'cash left when the cashier walked away' explains the same departure better than the
     generic B5 'leave' candidate, so the B5 one is dropped."""
-    b1 = [e.start for e in events if e.code == "B1" and e.info.get("reason") == "cash_left_cashier_away"]
+    b1 = [e.info.get("t_depart", e.start) for e in events
+          if e.code == "B1" and e.info.get("reason") == "cash_left_cashier_away"]
     return [e for e in events
             if not (e.code == "B5" and e.info.get("reason") == "cashier_left_room"
                     and any(abs(e.start - t) <= 2.0 for t in b1))]
@@ -114,6 +115,11 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
         T["vlm_s"] = round(T["vlm_s"] + time.time() - t0, 2)
     if budget is not None:
         T["vlm_budget_left_s"] = round(budget.left(), 1)
+        try:
+            import mlx.core as mx
+            T["mlx_peak_gb"] = round(mx.get_peak_memory() / 1e9, 2)
+        except Exception:
+            pass
 
     kept = [e for e in events if e.score >= VERDICT_THRESHOLD]
     violations, debug_events = [], []

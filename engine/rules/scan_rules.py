@@ -72,7 +72,7 @@ def detect(f: Facts) -> list[Event]:
                 start_in_window = d["t_depart"] - B1_RUN_BEFORE_DEPART <= t0 <= d["t_depart"]
                 t = t0 if start_in_window else d["t_depart"]
                 ev.append(Event("B1", t, d["t_exit"], 0.75, evidence_t=[t],
-                                info={"reason": "cash_left_cashier_away",
+                                info={"reason": "cash_left_cashier_away", "t_depart": d["t_depart"],
                                       "refine": ("banknotes_on_desk", tprev) if start_in_window and scan.banknotes_on_desk.any() else None,
                                       "seen": "на столе кассира остались наличные деньги без присмотра, кассир отошёл от рабочего места"}))
                 break

@@ -14,3 +14,4 @@ DETECTOR_REPO = "PekingU/rtdetr_v2_r18vd"
 VLM_REPO = "mlx-community/Qwen3-VL-4B-Instruct-4bit"
 
 SAMPLE_FPS = 3.0  # TUNE
+USE_CACHE = os.environ.get("ENGINE_NO_CACHE", "0") != "1"  # set ENGINE_NO_CACHE=1 for cold timings

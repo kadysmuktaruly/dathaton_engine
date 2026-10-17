@@ -76,7 +76,8 @@ def ask_frames(video: str, times: list[float], box, crop, budget: vlm.Budget | N
     return rows
 
 
-def scan(video: str, perc, scene, budget: vlm.Budget | None = None, use_cache: bool = True) -> pd.DataFrame:
+def scan(video: str, perc, scene, budget: vlm.Budget | None = None, use_cache: bool | None = None) -> pd.DataFrame:
+    use_cache = config.USE_CACHE if use_cache is None else use_cache
     cache = config.CACHE_DIR / "scan" / f"{_key(video)}.json"
     if use_cache and cache.exists():
         return pd.DataFrame(json.loads(cache.read_text()))

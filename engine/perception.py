@@ -84,7 +84,7 @@ def _cache_path(video: Path, fps: float) -> Path:
 
 
 def run(video: str | Path, models: Models | None = None, fps: float = config.SAMPLE_FPS,
-        use_cache: bool = True, batch: int = 8) -> Perception:
+        use_cache: bool | None = None, batch: int = 8) -> Perception:
     import cv2
     import supervision as sv
 
@@ -93,6 +93,7 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
     times = sample_times(info.duration, fps)
     cache = _cache_path(video, fps)
     tcache = cache.with_suffix(".times.npy")
+    use_cache = config.USE_CACHE if use_cache is None else use_cache
     if use_cache and cache.exists() and tcache.exists():
         return Perception(info, np.load(tcache).tolist(), pd.read_parquet(cache), {"cached": True})
 

@@ -5,5 +5,5 @@ RULES = {
     "B5": b5.detect,
     "C1": c1.detect,
     "C2": c2.detect,
-    "scan": scan_rules.detect,   # B1, B3, D1, B7, X0, B5-open (needs the VLM desk scan)
+    "objects": scan_rules.detect,   # B1, B3, D1, X0 (needs the VLM desk scan)
 }
