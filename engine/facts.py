@@ -18,6 +18,8 @@ class Facts:
     frames: pd.DataFrame    # one row per sampled frame: t, n_room, n_smooth, cashier_present, ...
     objects: pd.DataFrame   # raw object detections (for object rules)
     seat: tuple[float, float] | None  # cashier's usual foot position
+    video: str | None = None           # source video (for rules that look at pixels)
+    perc: object | None = None         # perception result (times, info, raw detections)
 
 
 def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:
@@ -28,7 +30,8 @@ def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:
     return out
 
 
-def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int) -> Facts:
+def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
+          video: str | None = None, perc=None) -> Facts:
     scene = build_scene(df, frame_w, frame_h)
     persons = df[df.kind == "person"].copy()
     from engine.scene import clean_persons
@@ -65,4 +68,4 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int) -> F
     # who is at the seat (cashier position) in each frame
     at_seat = room[room.d_seat <= 0.6].groupby("t").size()  # TUNE
     frames["seat_occupied"] = frames.t.map(at_seat).fillna(0).to_numpy() > 0
-    return Facts(scene, room, frames, df[df.kind == "obj"].copy(), seat)
+    return Facts(scene, room, frames, df[df.kind == "obj"].copy(), seat, video, perc)

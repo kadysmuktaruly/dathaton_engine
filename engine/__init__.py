@@ -10,6 +10,7 @@ SEEN_TEXT = {  # rule-based 'что видно' sentences (the VLM may replace t
     ("C1", "entered_empty_room"): "в помещение кассы, где не было кассира, вошёл человек и прошёл к рабочему месту кассира",
     ("C1", "third_person"): "во время обслуживания клиента в помещение кассы вошёл ещё один человек и подошёл к столу кассира",
     ("C1", "to_staff_side"): "в помещение кассы вошёл посторонний и прошёл на сторону рабочего места кассира",
+    ("C2", "door_left_open"): "кассир вошёл в помещение кассы и оставил дверь открытой; дверь остаётся открытой во время работы",
     ("B5", "cashier_left_room"): "кассир покинул помещение кассы, рабочее место и сейф остались без присмотра",
 }
 DEFAULT_SEEN = "в кадре видны действия, похожие на отступление от кассовых процедур"
@@ -26,13 +27,13 @@ def _get_models():
     return _models
 
 
-def detect_events(perc, frame_w: int, frame_h: int):
+def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None):
     """Run facts + all rules. Returns (facts, merged events, per-rule timings)."""
     from engine import facts as F
     from engine.events import merge
     from engine.rules import RULES
 
-    fa = F.build(perc.df, perc.times, frame_w, frame_h)
+    fa = F.build(perc.df, perc.times, frame_w, frame_h, video=video, perc=perc)
     events, timings = [], {}
     for name, fn in RULES.items():
         t0 = time.time()
@@ -67,7 +68,7 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
     fw, fh = crop[2] - crop[0], crop[3] - crop[1]
 
     t0 = time.time()
-    fa, events, rule_t = detect_events(perc, fw, fh)
+    fa, events, rule_t = detect_events(perc, fw, fh, video_path)
     T["rules_s"] = round(time.time() - t0, 2)
 
     T["vlm_s"] = 0.0

@@ -1,12 +1,14 @@
-"""C1: an outsider enters the cash room.
+"""C1: an outsider enters the cash area.
 
-Three patterns, all seen in training:
-  (a) someone enters while the room was empty for a while (X-32, X-33);
+Patterns seen in training:
   (b) a third person arrives while the cashier and a client are already present (X-18);
-  (c) a newcomer goes to the cashier's side of the desk next to the cashier (X-30).
-A normal client entering while only the cashier is present is NOT flagged (X-3, X-35).
+  (c) a newcomer comes to stand beside the cashier with no desk between them (X-30).
+Normal clients stay across the desk: the line between their feet and the cashier's runs
+through the desk (checked on all clean clips: 0-2% of frames 'beside' vs 100% for X-30).
+Entering an empty room and leaving the door open is C2.
 
-Timecode = first frame the newcomer is inside the room (catalog: «момент входа постороннего»).
+Timecode = the moment the newcomer reaches the cashier (labels mark this, e.g. X-18 at 20 s
+when the visitor hands over money; the catalog says «момент входа ... в зону кассы»).
 """
 from __future__ import annotations
 
@@ -15,68 +17,102 @@ import numpy as np
 from engine.events import Event
 from engine.facts import Facts
 
-EMPTY_BEFORE_S = 2.0   # TUNE: room must be empty this long before an entry counts as (a)
-START_GRACE_S = 1.0    # TUNE: people already there at the start are not entries
-MIN_STAY_S = 1.0       # TUNE: newcomer must stay this long (filters flicker)
-STAFF_SIDE_D = 0.6     # TUNE: within this many desk-widths of the cashier seat = staff side
+BESIDE_SEG_IN_DESK = 0.3   # TUNE: share of the feet-to-feet line inside the desk box
+BESIDE_DIST_H = 1.0        # TUNE: feet distance in person heights
+BESIDE_MIN_S = 2.0         # TUNE
+BESIDE_DEPTH_H = 0.4       # TUNE: |foot y difference| in person heights (side by side, not behind)
+THIRD_HOLD_S = 3.0         # TUNE: 3+ people must hold this long
+REACH_DIST_H = 1.3         # TUNE: 'reached the cashier' distance for the timecode
+
+
+def _seg_in_box(a, b, box, n=20) -> float:
+    return float(np.mean([box.contains(a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n)
+                          for k in range(n + 1)]))
+
+
+def _overlap(a, b) -> float:
+    """Intersection over the smaller box (a split box of the same person overlaps a lot)."""
+    ix = max(0.0, min(a.x1, b.x1) - max(a.x0, b.x0))
+    iy = max(0.0, min(a.y1, b.y1) - max(a.y0, b.y0))
+    small = min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0))
+    return ix * iy / max(small, 1e-6)
+
+
+def _cashier_track(f: Facts):
+    p = f.persons
+    return None if p.empty else p.groupby("track_id").t.nunique().idxmax()
 
 
 def detect(f: Facts) -> list[Event]:
-    fr = f.frames
-    if fr.empty:
+    p = f.persons
+    if p.empty or f.scene.desk is None:
         return []
+    h = max(f.scene.person_h_ref, 1.0)
+    desk = f.scene.desk
+    cashier = _cashier_track(f)
+    events = []
+
+    # (c) beside the cashier
+    for tr, rows in p.groupby("track_id"):
+        if tr == cashier:
+            continue
+        beside_t = []
+        for r in rows.itertuples():
+            others = p[(p.t == r.t) & (p.track_id != tr)]
+            if others.empty:
+                continue
+            o = others.iloc[int(np.argmin(np.hypot(others.fx - r.fx, others.fy - r.fy)))]
+            dist = np.hypot(r.fx - o.fx, r.fy - o.fy) / h
+            ov = _overlap(r, o)
+            same_depth = abs(r.fy - o.fy) / h < BESIDE_DEPTH_H
+            if ov < 0.3 and same_depth and dist < BESIDE_DIST_H and _seg_in_box((r.fx, r.fy), (o.fx, o.fy), desk) < BESIDE_SEG_IN_DESK:
+                beside_t.append(r.t)
+        if len(beside_t) >= max(2, int(BESIDE_MIN_S * 3)):
+            t0 = float(min(beside_t))
+            r0 = rows.iloc[int(np.argmin(np.abs(rows.t - t0)))]
+            events.append(Event("C1", t0, float(max(beside_t)), 0.8, evidence_t=[t0],
+                                boxes={t0: [("посторонний", [r0.x0, r0.y0, r0.x1, r0.y1])]},
+                                info={"reason": "to_staff_side", "track": int(tr)}))
+
+    # (b) a third person
+    fr = f.frames
     t = fr.t.to_numpy()
     n = fr.n_smooth.to_numpy()
-    events: list[Event] = []
-
-    # Entry moments: smoothed head count goes up.
-    for i in range(1, len(t)):
-        if n[i] <= n[i - 1] or t[i] < START_GRACE_S:
-            continue
-        # the count must hold for MIN_STAY_S
-        j = i
-        while j + 1 < len(t) and n[j + 1] >= n[i] and t[j + 1] - t[i] < MIN_STAY_S:
-            j += 1
-        if t[j] - t[i] < MIN_STAY_S - 0.4 and j + 1 < len(t):
-            continue
-        before = n[(t >= t[i] - EMPTY_BEFORE_S) & (t < t[i])]
-        prev = int(np.max(before)) if len(before) else 0
-        newcomer = _newcomer(f, t[i])
-        t_in = newcomer["t_first"] if newcomer else t[i]
-        reason = None
-        score = 0.0
-        if prev == 0 and t[i] >= EMPTY_BEFORE_S:
-            reason, score = "entered_empty_room", 0.7
-        elif n[i] >= 3:
-            reason, score = "third_person", 0.75
-        elif newcomer and newcomer["min_d_seat"] <= STAFF_SIDE_D and newcomer["cashier_present"]:
-            reason, score = "to_staff_side", 0.8
-        if reason:
-            boxes = {}
-            if newcomer:
-                boxes[t_in] = [("посторонний", newcomer["box"])]
-            events.append(Event("C1", float(t_in), float(t_in + MIN_STAY_S), score,
-                                evidence_t=[float(t_in)], boxes=boxes,
-                                info={"reason": reason, "count": int(n[i]), "prev": prev,
-                                      "track": newcomer["track"] if newcomer else None}))
+    i = 0
+    while i < len(t):
+        if n[i] >= 3:
+            j = i
+            while j + 1 < len(t) and n[j + 1] >= 3:
+                j += 1
+            if t[j] - t[i] >= THIRD_HOLD_S:
+                ev = _third(f, t[i], t[j], cashier, h)
+                if ev:
+                    events.append(ev)
+            i = j + 1
+        else:
+            i += 1
     return events
 
 
-def _newcomer(f: Facts, t_up: float) -> dict | None:
-    """The in-room track that first appears closest to the moment the count went up."""
+def _third(f: Facts, t_up: float, t_end: float, cashier, h: float) -> Event | None:
     p = f.persons
-    if p.empty:
-        return None
     first = p.groupby("track_id").t.min()
-    cand = first[(first >= t_up - 1.5) & (first <= t_up + 0.5)]
+    cand = first[(first >= t_up - 3.0) & (first <= t_up + 0.5)]
+    cand = cand[cand.index != cashier]
     if cand.empty:
-        return None
+        return Event("C1", float(t_up), float(t_end), 0.6, evidence_t=[float(t_up)],
+                     info={"reason": "third_person"})
     tr = cand.sub(t_up).abs().idxmin()
-    rows = p[(p.track_id == tr)]
-    later = rows[rows.t <= rows.t.min() + 6.0]
-    r0 = rows.sort_values("t").iloc[0]
-    others = p[(p.t >= later.t.min()) & (p.t <= later.t.max()) & (p.track_id != tr)]
-    return {"track": int(tr), "t_first": float(r0.t),
-            "box": [float(r0.x0), float(r0.y0), float(r0.x1), float(r0.y1)],
-            "min_d_seat": float(later.d_seat.min()),
-            "cashier_present": bool((others.d_seat <= STAFF_SIDE_D).any())}
+    rows = p[p.track_id == tr].sort_values("t")
+    cash = p[p.track_id == cashier]
+    t_reach = None
+    for r in rows.itertuples():
+        c = cash[(cash.t - r.t).abs() <= 0.2]
+        if len(c) and np.hypot(r.fx - c.fx.iloc[0], r.fy - c.fy.iloc[0]) / h < REACH_DIST_H:
+            t_reach = float(r.t)
+            break
+    t0 = t_reach if t_reach is not None else float(rows.t.iloc[0])
+    r0 = rows.iloc[int(np.argmin(np.abs(rows.t - t0)))]
+    return Event("C1", t0, float(t_end), 0.75, evidence_t=[t0],
+                 boxes={t0: [("посторонний", [r0.x0, r0.y0, r0.x1, r0.y1])]},
+                 info={"reason": "third_person", "track": int(tr), "t_enter": float(rows.t.iloc[0])})

@@ -34,7 +34,7 @@ def departures(f: Facts) -> list[dict]:
             continue
         last = p[p.t == p.t.max()].iloc[0]
         tr = p[p.track_id == last.track_id].sort_values("t")
-        t_dep = _depart_by_depth(p, t_exit, f.scene.person_h_ref)
+        t_dep = _depart_by_walk(p, t_exit, f.scene.person_h_ref)
         out.append({"t_exit": t_exit, "t_depart": t_dep, "absent_s": float(absent),
                     "box": [float(last.x0), float(last.y0), float(last.x1), float(last.y1)],
                     "track": int(last.track_id), "to_end": j == len(t) - 1})
@@ -92,3 +92,55 @@ def _depart_by_depth(p, t_exit: float, h_ref: float) -> float:
     work_y = float(early.median())
     ok = fy[fy >= work_y - 0.15 * h_ref]  # TUNE
     return float(ok.index.max()) if len(ok) else float(fy.index[0])
+
+
+WALK_SPEED = 0.35  # TUNE: person-heights per second; above = walking
+
+
+def _depart_by_walk(p, t_exit: float, h_ref: float) -> float:
+    """Start of the final walk out: follow the single in-room person frame by frame (no track
+    IDs), smooth the foot path over ~1 s, and find where the last continuous walking stretch
+    that ends at the exit begins."""
+    win = p[(p.t >= t_exit - 12) & (p.t <= t_exit)].sort_values("t")
+    if win.empty:
+        return t_exit
+    pts = []
+    prev = None
+    for t, g in win.groupby("t"):
+        if prev is None:
+            r = g.loc[g.y1.idxmax()]
+        else:
+            r = g.iloc[int(np.argmin(np.hypot(g.fx - prev[0], g.fy - prev[1])))]
+        prev = (r.fx, r.fy)
+        pts.append((t, r.fx, r.fy))
+    pts = np.array(pts)
+    if len(pts) < 4:
+        return float(pts[0, 0])
+    ts = pts[:, 0]
+    # smooth positions with a 1 s moving median
+    xs = np.array([np.median(pts[np.abs(ts - t) <= 0.5, 1]) for t in ts])
+    ys = np.array([np.median(pts[np.abs(ts - t) <= 0.5, 2]) for t in ts])
+    sp = np.zeros(len(ts))
+    for k in range(1, len(ts)):
+        dt = max(ts[k] - ts[k - 1], 1e-3)
+        sp[k] = np.hypot(xs[k] - xs[k - 1], ys[k] - ys[k - 1]) / max(h_ref, 1.0) / dt
+    walking = sp > WALK_SPEED
+    k = len(ts) - 1
+    # skip still frames at the very end (person standing at the door / behind the glass)
+    while k > 0 and not walking[k]:
+        k -= 1
+    if k == 0:
+        return float(ts[-1])
+    gap = 0.0
+    j = k
+    while j > 0:
+        if walking[j - 1]:
+            gap = 0.0
+        else:
+            gap += ts[j] - ts[j - 1]
+            if gap > 0.7:  # TUNE: longer pause = she was working, not walking
+                break
+        j -= 1
+    while j < k and not walking[j]:
+        j += 1
+    return float(ts[j])
