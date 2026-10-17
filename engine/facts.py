@@ -20,6 +20,7 @@ class Facts:
     seat: tuple[float, float] | None  # cashier's usual foot position
     video: str | None = None           # source video (for rules that look at pixels)
     perc: object | None = None         # perception result (times, info, raw detections)
+    scan: pd.DataFrame | None = None   # VLM desk-scan flags per sampled frame (if run)
 
 
 def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:

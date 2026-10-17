@@ -71,6 +71,6 @@ class Budget:
         return self.left() >= need
 
 
-def verify(video_path, perc, fa, events):
+def verify(video_path, perc, fa, events, budget=None):
     """Placeholder until Step 6: keep events as they are."""
     return events

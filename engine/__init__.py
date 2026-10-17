@@ -27,19 +27,51 @@ def _get_models():
     return _models
 
 
-def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None):
-    """Run facts + all rules. Returns (facts, merged events, per-rule timings)."""
+SCAN_BUDGET_S = 18.0   # TUNE: VLM desk scan share of the per-video VLM budget
+VLM_BUDGET_S = 25.0    # hard per-video VLM budget
+
+
+def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, budget=None):
+    """Facts (+ VLM desk scan when a budget is given) + all rules.
+    Returns (facts, merged events, per-rule timings)."""
     from engine import facts as F
     from engine.events import merge
     from engine.rules import RULES
 
     fa = F.build(perc.df, perc.times, frame_w, frame_h, video=video, perc=perc)
-    events, timings = [], {}
+    timings = {}
+    if budget is not None and video is not None:
+        from engine import vlm, vlm_scan
+        t0 = time.time()
+        fa.scan = vlm_scan.scan(video, perc, fa.scene, vlm.Budget(min(SCAN_BUDGET_S, budget.left())))
+        timings["scan"] = round(time.time() - t0, 2)
+    events = []
     for name, fn in RULES.items():
         t0 = time.time()
         events += fn(fa)
         timings[name] = round(time.time() - t0, 3)
+    events = _resolve(events)
+    if budget is not None and fa.scan is not None and video is not None:
+        from engine import vlm_scan
+        crop = perc.info.crop
+        box = vlm_scan.desk_crop_box(fa.scene, crop[2] - crop[0], crop[3] - crop[1])
+        for e in events:
+            ref = e.info.get("refine")
+            if ref and budget.ok(3.0):
+                t_new = vlm_scan.refine(video, perc, box, ref[0], ref[1], e.start, budget)
+                e.info["t_scan"] = e.start
+                e.start = t_new
+                e.evidence_t = [t_new]
     return fa, merge(events), timings
+
+
+def _resolve(events):
+    """B1 'cash left when the cashier walked away' explains the same departure better than the
+    generic B5 'leave' candidate, so the B5 one is dropped."""
+    b1 = [e.start for e in events if e.code == "B1" and e.info.get("reason") == "cash_left_cashier_away"]
+    return [e for e in events
+            if not (e.code == "B5" and e.info.get("reason") == "cashier_left_room"
+                    and any(abs(e.start - t) <= 2.0 for t in b1))]
 
 
 def _add_cashier_boxes(fa, ev):
@@ -67,16 +99,21 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
     crop = perc.info.crop
     fw, fh = crop[2] - crop[0], crop[3] - crop[1]
 
+    budget = None
+    if use_vlm:
+        from engine import vlm
+        budget = vlm.Budget(VLM_BUDGET_S)
     t0 = time.time()
-    fa, events, rule_t = detect_events(perc, fw, fh, video_path)
-    T["rules_s"] = round(time.time() - t0, 2)
-
-    T["vlm_s"] = 0.0
-    if use_vlm and events:
+    fa, events, rule_t = detect_events(perc, fw, fh, video_path, budget)
+    T["rules_s"] = round(time.time() - t0 - rule_t.get("scan", 0.0), 2)
+    T["vlm_s"] = rule_t.get("scan", 0.0)
+    if use_vlm and events and budget.ok(3.0):
         from engine import vlm
         t0 = time.time()
-        events = vlm.verify(video_path, perc, fa, events)
-        T["vlm_s"] = round(time.time() - t0, 2)
+        events = vlm.verify(video_path, perc, fa, events, budget)
+        T["vlm_s"] = round(T["vlm_s"] + time.time() - t0, 2)
+    if budget is not None:
+        T["vlm_budget_left_s"] = round(budget.left(), 1)
 
     kept = [e for e in events if e.score >= VERDICT_THRESHOLD]
     violations, debug_events = [], []
