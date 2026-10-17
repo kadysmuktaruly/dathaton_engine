@@ -13,6 +13,26 @@ Then run offline:
 ```bash
 export HF_HUB_OFFLINE=1
 ```
+### Fine-tuned detector (optional, recommended)
+The stock RT-DETRv2 doesn't know the cash-room objects. A fine-tuned checkpoint (`cash`, `safe`, `safe_open`,
+`counting_machine`, `collection_bag`, `desk` + the COCO classes we use) is published as a GitHub Release asset,
+because `weights/` is git-ignored.
+
+1. Download `detector_ft.zip` from the repo's **Releases** page (tag `detector-ft-v1`).
+2. Check it and unzip into `weights/`:
+   ```bash
+   shasum -a 256 detector_ft.zip   # de130cca3f6f9ced6ef3277a05f4a602a05e84605d361a8d2ee28a61c17ee600
+   unzip detector_ft.zip -d weights/   # -> weights/detector_ft/
+   ```
+3. Turn it on (without this variable the engine uses the stock detector):
+   ```bash
+   export ENGINE_DETECTOR_PATH=weights/detector_ft
+   ```
+
+Val AP@0.5 (82 frames from 8 held-out clips): 0.75 on the 6 new classes (stock: 0), 0.72 over all classes
+(stock: 0.28). Weak: `cash` 0.55, `id_card` 0.29, `cup` 0.07 (stock 1.00, only 1 training box).
+Per-class numbers: `weights/detector_ft/metrics.json`. How it was trained: `docs/labeling.md`.
+
 Videos are read from `videos/` (override with `DATA_DIR`), labels from `open_labels.xlsx` (`LABELS_XLSX`).
 
 ## Run

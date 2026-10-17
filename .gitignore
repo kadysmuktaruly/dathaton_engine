@@ -12,3 +12,6 @@ reports/sheets/
 
 # detector fine-tuning data (frames, Label Studio exports, COCO files)
 data/
+
+# release archives (uploaded to GitHub Releases, not committed)
+dist/
