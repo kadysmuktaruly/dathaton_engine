@@ -12,6 +12,7 @@ SEEN_TEXT = {  # rule-based 'что видно' sentences (the VLM may replace t
     ("C1", "to_staff_side"): "в помещение кассы вошёл посторонний и прошёл на сторону рабочего места кассира",
     ("C2", "door_left_open"): "кассир вошёл в помещение кассы и оставил дверь открытой; дверь остаётся открытой во время работы",
     ("B5", "cashier_left_room"): "кассир покинул помещение кассы, рабочее место и сейф остались без присмотра",
+    ("B5", "safe_open_unattended"): "кассир покинул помещение кассы, сейф остался открытым без присмотра",
 }
 DEFAULT_SEEN = "в кадре видны действия, похожие на отступление от кассовых процедур"
 VERDICT_THRESHOLD = 0.3  # TUNE: low on purpose (recall first)
@@ -143,8 +144,10 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
         budget = vlm.Budget(vlm_budget)
         t0 = time.time()
         fa, events, rule_t = detect_events(perc, fw, fh, video_path, budget)
-        if events and budget.ok(3.0):
-            events = vlm.verify(video_path, perc, fa, events, budget)
+        # events that even a VLM 'yes' cannot lift to the verdict threshold are not asked about
+        hopeful = [e for e in events if e.score + vlm.YES_LIFT >= VERDICT_THRESHOLD]
+        if hopeful and budget.ok(3.0):
+            vlm.verify(video_path, perc, fa, hopeful, budget)  # updates scores in place
         T["vlm_s"] = round(time.time() - t0, 2)
         T["vlm_budget_left_s"] = round(budget.left(), 1)
         try:

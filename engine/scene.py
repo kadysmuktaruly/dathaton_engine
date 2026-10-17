@@ -11,8 +11,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-TABLE = {"diningtable", "dining table"}
-MACHINE_LIKE = {"suitcase", "handbag", "backpack", "tvmonitor", "tv", "printer"}  # stock-class aliases
+# Object roles come from engine.classes.ROLES (detector class -> engine role).
 STABLE_FRAC = 0.4  # TUNE: an anchor must be seen in >= this share of frames
 
 # Keypoint indices (COCO-17)
@@ -73,10 +72,22 @@ class Scene:
         return max(self.person_h_ref, 1.0)
 
 
+def _with_roles(obj: pd.DataFrame) -> pd.DataFrame:
+    if "role" in obj:
+        return obj
+    from engine.classes import role_map
+    return obj.assign(role=obj.cls.map(role_map())).dropna(subset=["role"])
+
+
 def _stable_clusters(obj: pd.DataFrame, n_frames: int) -> pd.DataFrame:
-    """Group detections of the same class whose boxes overlap; return median box per group."""
+    """Group detections of the same role whose boxes overlap; return median box per group.
+
+    A group whose top 10% of confidences stays below ANCHOR_MIN is dropped: one weak box
+    seen in many frames is not trusted as an anchor (levels per role).
+    """
+    from engine.perception import ANCHOR_MIN
     out = []
-    for cls, g in obj.groupby("cls"):
+    for role, g in _with_roles(obj).groupby("role"):
         boxes = g[["x0", "y0", "x1", "y1"]].to_numpy()
         ts = g["t"].to_numpy()
         conf = g["conf"].to_numpy()
@@ -89,10 +100,13 @@ def _stable_clusters(obj: pd.DataFrame, n_frames: int) -> pd.DataFrame:
             members = [j for j in range(len(g)) if not used[j] and iou(bi, Box(*boxes[j])) > 0.4]
             for j in members:
                 used[j] = True
+            p90 = float(np.quantile(conf[members], 0.9))
+            if p90 < ANCHOR_MIN.get(role, 0.5):
+                continue
             frames = len(set(ts[members]))
             med = np.median(boxes[members], axis=0)
-            out.append((cls, frames / max(n_frames, 1), float(np.median(conf[members])), *med))
-    return pd.DataFrame(out, columns=["cls", "frac", "conf", "x0", "y0", "x1", "y1"])
+            out.append((role, frames / max(n_frames, 1), float(np.median(conf[members])), p90, *med))
+    return pd.DataFrame(out, columns=["role", "frac", "conf", "conf_p90", "x0", "y0", "x1", "y1"])
 
 
 def foot_point(row) -> tuple[float, float]:
@@ -106,8 +120,19 @@ def foot_point(row) -> tuple[float, float]:
     return float((row.x0 + row.x1) / 2), float(row.y1)
 
 
-def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int) -> Scene:
-    n = df["t"].nunique()
+def _best(cl: pd.DataFrame, role: str) -> Box | None:
+    """Most stable cluster of a role (ties: higher median confidence)."""
+    c = cl[cl.role == role]
+    if c.empty:
+        return None
+    r = c.sort_values(["frac", "conf"], ascending=False).iloc[0]
+    return Box(r.x0, r.y0, r.x1, r.y1)
+
+
+def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int, n_frames: int | None = None) -> Scene:
+    """n_frames: number of sampled frames, including frames with no detections (they count
+    against an anchor's stability). Defaults to the frames present in df."""
+    n = max(int(n_frames or 0), int(df["t"].nunique()))
     obj = df[df.kind == "obj"]
     cl = _stable_clusters(obj, n)
     cl = cl[cl.frac >= STABLE_FRAC]
@@ -125,18 +150,18 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int) -> Scene:
     wrists = np.array(wrists) if wrists else np.zeros((0, 2))
 
     laptop = None
-    lap = cl[cl.cls == "laptop"].sort_values("frac", ascending=False)
+    lap = cl[cl.role == "laptop"].sort_values("frac", ascending=False)
     if len(lap):
         laptop = Box(*lap.iloc[0][["x0", "y0", "x1", "y1"]])
 
     # Work area = hull of stable devices (laptop + machine-like boxes) not touching the
     # bottom edge (foreground furniture) and not huge.
     devs, tall = [], []
-    for r in cl[(cl.cls.isin(MACHINE_LIKE | {"laptop"})) & (cl.frac >= 0.5)].itertuples():
+    for r in cl[(cl.role.isin({"machine_like", "counting_machine", "laptop"})) & (cl.frac >= 0.5)].itertuples():
         b = Box(r.x0, r.y0, r.x1, r.y1)
         if b.y1 >= 0.95 * frame_h or b.w >= 0.4 * frame_w:
             continue  # foreground furniture
-        if r.cls != "laptop" and b.h > 1.25 * b.w:  # TUNE: tall box = safe-like, not a desk device
+        if r.role == "machine_like" and b.h > 1.25 * b.w:  # TUNE: tall box = safe-like, not a desk device
             tall.append(b)
         else:
             devs.append(b)
@@ -151,7 +176,7 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int) -> Scene:
     # Desk = hull united with table detections that mostly overlap it.
     desk = hull
     notes = []
-    tables = [Box(r.x0, r.y0, r.x1, r.y1) for r in cl[cl.cls.isin(TABLE)].itertuples()]
+    tables = [Box(r.x0, r.y0, r.x1, r.y1) for r in cl[cl.role == "table"].itertuples()]
     if hull is not None:
         for b in tables:
             ix = max(0.0, min(b.x1, hull.x1) - max(b.x0, hull.x0))
@@ -162,20 +187,26 @@ def build_scene(df: pd.DataFrame, frame_w: int, frame_h: int) -> Scene:
     elif tables:
         def act_t(b):
             return float(np.mean([b.contains(x, y) for x, y in wrists])) if len(wrists) else 0.0
-        desk = max((b for b in tables if b.y1 < 0.95 * frame_h) or tables, key=act_t)
+        desk = max([b for b in tables if b.y1 < 0.95 * frame_h] or tables, key=act_t)
         notes.append("no stable devices; desk from table detections")
-    else:
+    elif _best(cl, "desk") is None:
         notes.append("desk not found")
+    # Explicit (fine-tuned) desk / counting_machine / safe boxes win over the look-alike logic.
+    explicit_desk = _best(cl, "desk")
+    if explicit_desk is not None:
+        desk = explicit_desk
+        notes.append("desk from desk detections")
 
-    machine = None
-    if desk is not None:
+    machine = _best(cl, "counting_machine")
+    if machine is not None:
+        notes.append("machine from counting_machine detections")
+    elif desk is not None:
         cands = [b for b in devs if laptop is None or iou(b, laptop) < 0.3]
         if cands:
             machine = max(cands, key=lambda b: b.w * b.h)
-    safe = None
-    sc = cl[cl.cls == "safe"]
-    if len(sc):
-        safe = Box(*sc.sort_values("frac", ascending=False).iloc[0][["x0", "y0", "x1", "y1"]])
+    safe = _best(cl, "safe")  # built from safe and safe_open boxes
+    if safe is not None:
+        notes.append("safe from safe detections")
     elif tall and desk is not None:
         near = [b for b in tall if np.hypot(b.cx - desk.cx, b.cy - desk.cy) < 1.2 * desk.w]
         if near:

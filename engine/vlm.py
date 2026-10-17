@@ -74,6 +74,7 @@ class Budget:
 APPEARANCE = re.compile(r"розов|бел[аоы]|ч[её]рн|сер[аоы]|волос|кофт|рубаш|пиджак|кардиган|девушк|женщин|мужчин|"
                         r"молод|парен|очк|блондин|брюнет|красив|лиц[оа]", re.I)
 UNSEEN = re.compile(r"документ|подпис|провод|квитанц|сверк|чек[аи]?\b|зачисл", re.I)
+YES_LIFT = 0.15  # most a VLM 'yes' can add to an event's score
 NO_FLOOR = 0.3   # a 'no' never pushes an event below the verdict threshold: on the training
                  # clips the 4B VLM said 'not visible' on clear cases (cash on the desk in X-26),
                  # so it may lower confidence but cannot veto (recall first)
@@ -129,7 +130,7 @@ def verify(video_path, perc, fa, events, budget=None):
         conf = float(ans.get("confidence", 0.5) or 0.5)
         ev.info["vlm"] = {"visible": visible, "confidence": conf, "raw_seen": ans.get("what_is_seen")}
         if visible is True:
-            ev.score = min(1.0, ev.score + 0.15 * conf)
+            ev.score = min(1.0, ev.score + YES_LIFT * conf)
         elif visible is False:
             ev.score = max(min(ev.score, NO_FLOOR), ev.score - 0.25 * conf)
         s = clean_sentence(ans.get("what_is_seen"), v["visual_cues"] + " " + v["not_flag"])

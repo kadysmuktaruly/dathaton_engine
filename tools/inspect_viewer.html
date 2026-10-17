@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Detector Inspection</title>
+<style>
+/* Local review page written by tools/inspect_detections.py. Layout: frame left, controls + boxes right. */
+:root {
+  --bg: #f4f5f3; --panel: #ffffff; --fg: #1c221f; --muted: #5d6862; --line: #d8dcd8; --accent: #1f6f5c; --chip: #e9ece9; --warn: #b54708;
+  --f-ui: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --f-data: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #121614; --panel: #1a201d; --fg: #e3e8e4; --muted: #94a199; --line: #2c3430; --accent: #5fc4a8; --chip: #232a26; --warn: #f79009; color-scheme: dark } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--f-ui); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+h1 { margin: 0; font-size: 1.35rem; font-weight: 600; }
+.sub { color: var(--muted); font-size: .85rem; }
+.sub code { font-family: var(--f-data); font-size: .8rem; }
+.lbl { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select { font: inherit; }
+.chip { border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+.chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip small { color: var(--muted); margin-left: 6px; font-family: var(--f-data); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.main { display: grid; grid-template-columns: minmax(0, 460px) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.frame { position: relative; background: #000; border-radius: 6px; overflow: hidden; }
+.frame img { display: block; width: 100%; height: auto; }
+.frame svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.hud { position: absolute; left: 8px; top: 8px; font: 12px var(--f-data); color: #fff; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 3px; }
+.empty-tag { position: absolute; right: 8px; top: 8px; font: 12px var(--f-data); color: #000; background: #fdb022; padding: 2px 6px; border-radius: 3px; }
+.strip { display: flex; gap: 2px; overflow-x: auto; padding-bottom: 4px; }
+.strip button { flex: 0 0 auto; width: 14px; height: 26px; border: 0; border-radius: 2px; cursor: pointer; padding: 0; }
+.strip button[aria-current="true"] { outline: 2px solid var(--fg); outline-offset: 1px; }
+.nav { display: flex; gap: 8px; align-items: center; font-family: var(--f-data); font-size: .85rem; }
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: 0; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.stat { padding: 8px 12px; border-right: 1px solid var(--line); }
+.stat:last-child { border-right: 0; }
+.stat b { display: block; font: 500 1.35rem var(--f-data); font-variant-numeric: tabular-nums; }
+.stat span { font-size: .75rem; color: var(--muted); }
+.ctl { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 12px 20px; }
+.ctl label { display: flex; justify-content: space-between; gap: 8px; }
+.ctl output { font-family: var(--f-data); }
+.ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+.classes { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .85rem; }
+.classes label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.sw { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+.list { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); max-height: 24rem; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 500; }
+td.n { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+tr.dim td { color: var(--muted); }
+tr.hl td { background: var(--chip); }
+.bar { position: relative; display: inline-block; width: 80px; height: 7px; background: var(--chip); border-radius: 4px; margin-right: 8px; vertical-align: middle; }
+.bar i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; }
+.bar u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--fg); }
+.note { font-size: .8rem; color: var(--muted); max-width: 90ch; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Detector inspection</h1>
+    <div class="sub" id="meta"></div>
+  </header>
+
+  <div><div class="lbl">Clip</div><div class="row" id="clips"></div></div>
+
+  <div class="main">
+    <div class="side" style="gap:10px">
+      <div class="frame" id="frame"><img id="img" alt=""><svg id="ov" aria-hidden="true"></svg><div class="hud" id="hud"></div><div class="empty-tag" id="emptyTag" hidden>no boxes</div></div>
+      <div class="nav"><button class="chip" id="prev" type="button">◀ Prev</button><button class="chip" id="next" type="button">Next ▶</button><span id="pos"></span></div>
+      <div><div class="lbl">Frames · height = boxes above the cutoff, amber = no detections</div><div class="strip" id="strip"></div></div>
+    </div>
+
+    <div class="side">
+      <div class="stats" id="stats"></div>
+      <div class="ctl">
+        <div><label for="objMin">Object cutoff <output id="objOut"></output></label><input type="range" id="objMin" min="0.25" max="0.95" step="0.05"></div>
+        <div><label for="perMin">Person cutoff <output id="perOut"></output></label><input type="range" id="perMin" min="0.25" max="0.95" step="0.05"></div>
+      </div>
+      <div class="row">
+        <label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="showWeak" checked> Show boxes below the cutoff (dashed)</label>
+        <button class="chip" id="reset" type="button">Engine settings</button>
+      </div>
+      <div><div class="lbl">Classes</div><div class="classes" id="classes"></div></div>
+      <div class="list"><table><thead><tr><th>Class</th><th>Role</th><th>Confidence</th><th>Box (cropped px)</th><th>Box (original px)</th></tr></thead><tbody id="rows"></tbody></table></div>
+      <p class="note" id="note"></p>
+    </div>
+  </div>
+</div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+(() => {
+  const D = JSON.parse(document.getElementById('data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const PALETTE = D.colors;
+  const color = (c) => PALETTE[c] || '#9e9e9e';
+  const st = { clip: 0, frame: 0, obj: D.run.obj_min, per: D.run.person_min, weak: true, hidden: new Set(), hl: -1 };
+  const floorOf = (d) => d.cls === 'person' ? st.per : st.obj;
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+  const fmtBox = (b) => b.map(v => Math.round(v)).join(', ');
+
+  $('meta').textContent = '';
+  const m = $('meta');
+  m.append(document.createTextNode('Detector: '));
+  const code = document.createElement('code'); code.textContent = D.run.detector_source; m.appendChild(code);
+  m.append(document.createTextNode(` · ${D.run.device} · ${D.run.fps} frame/s sampled · written ${D.run.written}. Local file: keep it off shared drives and chats.`));
+
+  function clipButtons() {
+    const box = $('clips'); box.innerHTML = '';
+    D.clips.forEach((c, i) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip';
+      b.setAttribute('aria-pressed', i === st.clip);
+      b.textContent = c.clip;
+      const s = document.createElement('small'); s.textContent = `${c.summary.frames_without_detections}/${c.summary.frames} empty`;
+      b.appendChild(s);
+      b.onclick = () => { st.clip = i; st.frame = 0; st.hl = -1; render(); };
+      box.appendChild(b);
+    });
+  }
+
+  function classToggles() {
+    const all = new Set();
+    D.clips.forEach(c => c.frames.forEach(f => f.dets.forEach(d => all.add(d.cls))));
+    const box = $('classes'); box.innerHTML = '';
+    [...all].sort().forEach(name => {
+      const l = document.createElement('label');
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !st.hidden.has(name); cb.id = 'cls-' + name.replace(/\W/g, '_');
+      cb.onchange = () => { cb.checked ? st.hidden.delete(name) : st.hidden.add(name); render(); };
+      const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = color(name);
+      l.append(cb, sw, document.createTextNode(name));
+      box.appendChild(l);
+    });
+  }
+
+  function render() {
+    const c = D.clips[st.clip], f = c.frames[st.frame];
+    [...$('clips').children].forEach((b, i) => b.setAttribute('aria-pressed', i === st.clip));
+    $('img').src = f.img; $('img').alt = `${c.clip} at ${f.actual_t.toFixed(2)} s`;
+    $('hud').textContent = `${c.clip}  t=${f.actual_t.toFixed(2)}s  #${f.idx}`;
+    $('pos').textContent = `frame ${st.frame + 1} / ${c.frames.length}`;
+    const dets = f.dets.map((d, i) => ({ ...d, i, rep: d.conf >= floorOf(d) })).filter(d => !st.hidden.has(d.cls));
+    $('emptyTag').hidden = f.dets.length > 0;
+
+    // overlay
+    const svg = $('ov'); svg.innerHTML = ''; svg.setAttribute('viewBox', `0 0 ${f.w} ${f.h}`);
+    dets.slice().sort((a, b) => a.conf - b.conf).forEach(d => {
+      if (!d.rep && !st.weak && d.i !== st.hl) return;
+      const [x0, y0, x1, y1] = d.box, col = color(d.cls), hl = d.i === st.hl;
+      el('rect', { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: hl ? col : 'none', 'fill-opacity': hl ? .25 : 0, stroke: col,
+        'stroke-width': hl ? 3.5 : d.rep ? 2.5 : 1.2, 'stroke-dasharray': d.rep || hl ? 'none' : '6 4' }, svg);
+      if (d.rep || hl) {
+        const txt = `${d.cls} ${d.conf.toFixed(2)}`, w = txt.length * 6.2 + 8, ty = y0 > 16 ? y0 - 15 : y0;
+        el('rect', { x: x0, y: ty, width: w, height: 15, fill: col }, svg);
+        const t = el('text', { x: x0 + 4, y: ty + 11, fill: '#000', 'font-size': 11, 'font-family': 'ui-monospace, Menlo, monospace' }, svg);
+        t.textContent = txt;
+      }
+    });
+
+    // filmstrip
+    const strip = $('strip'); strip.innerHTML = '';
+    const maxRep = Math.max(1, ...c.frames.map(fr => fr.dets.filter(d => d.conf >= floorOf(d) && !st.hidden.has(d.cls)).length));
+    c.frames.forEach((fr, i) => {
+      const n = fr.dets.filter(d => d.conf >= floorOf(d) && !st.hidden.has(d.cls)).length;
+      const b = document.createElement('button'); b.type = 'button';
+      b.title = `${fr.actual_t.toFixed(2)} s · ${n} boxes above cutoff`;
+      b.setAttribute('aria-label', b.title);
+      b.style.background = fr.dets.length === 0 ? 'var(--warn)' : `color-mix(in srgb, var(--accent) ${20 + 80 * n / maxRep}%, var(--chip))`;
+      if (i === st.frame) b.setAttribute('aria-current', 'true');
+      b.onclick = () => { st.frame = i; st.hl = -1; render(); };
+      strip.appendChild(b);
+    });
+
+    // stats for this clip at the current cutoffs
+    const allD = c.frames.flatMap(fr => fr.dets);
+    const rep = allD.filter(d => d.conf >= floorOf(d));
+    const stats = [
+      [c.summary.frames, 'frames'], [c.summary.frames_without_detections, 'with no boxes'],
+      [allD.length, 'boxes ≥ 0.25'], [rep.length, 'above cutoff'], [c.summary.detect_ms_per_frame + ' ms', 'detect / frame'],
+    ];
+    const sb = $('stats'); sb.innerHTML = '';
+    stats.forEach(([v, k]) => { const d = document.createElement('div'); d.className = 'stat'; const b = document.createElement('b'); b.textContent = v; const s = document.createElement('span'); s.textContent = k; d.append(b, s); sb.appendChild(d); });
+
+    // table
+    const tb = $('rows'); tb.innerHTML = '';
+    dets.slice().sort((a, b) => b.conf - a.conf).forEach(d => {
+      const tr = document.createElement('tr'); if (!d.rep) tr.className = 'dim'; if (d.i === st.hl) tr.classList.add('hl');
+      const c1 = document.createElement('td'); const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = color(d.cls); sw.style.marginRight = '6px'; c1.append(sw, document.createTextNode(d.cls));
+      const c2 = document.createElement('td'); c2.textContent = d.role || '—';
+      const c3 = document.createElement('td'); c3.className = 'n';
+      const bar = document.createElement('span'); bar.className = 'bar'; const fi = document.createElement('i'); fi.style.width = (d.conf * 100) + '%'; fi.style.background = color(d.cls);
+      const mk = document.createElement('u'); mk.style.left = (floorOf(d) * 100) + '%'; bar.append(fi, mk); c3.append(bar, document.createTextNode(d.conf.toFixed(2)));
+      const c4 = document.createElement('td'); c4.className = 'n'; c4.textContent = fmtBox(d.box);
+      const c5 = document.createElement('td'); c5.className = 'n'; c5.textContent = fmtBox(d.obox);
+      tr.append(c1, c2, c3, c4, c5);
+      tr.onmouseenter = () => { st.hl = d.i; render(); };
+      tr.onmouseleave = () => { st.hl = -1; render(); };
+      tb.appendChild(tr);
+    });
+    if (!dets.length) { const tr = document.createElement('tr'); const td = document.createElement('td'); td.colSpan = 5; td.textContent = f.dets.length ? 'All boxes in this frame are hidden by the class filter.' : 'The detector returned no boxes for this frame.'; tr.appendChild(td); tb.appendChild(tr); }
+
+    $('objOut').textContent = st.obj.toFixed(2); $('perOut').textContent = st.per.toFixed(2);
+    $('objMin').value = st.obj; $('perMin').value = st.per; $('showWeak').checked = st.weak;
+  }
+
+  $('objMin').oninput = e => { st.obj = Number(e.target.value); render(); };
+  $('perMin').oninput = e => { st.per = Number(e.target.value); render(); };
+  $('showWeak').onchange = e => { st.weak = e.target.checked; render(); };
+  $('reset').onclick = () => { st.obj = D.run.obj_min; st.per = D.run.person_min; render(); };
+  const step = (k) => { const n = D.clips[st.clip].frames.length; st.frame = (st.frame + k + n) % n; st.hl = -1; render(); };
+  $('prev').onclick = () => step(-1); $('next').onclick = () => step(1);
+  document.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; if (e.key === 'ArrowLeft') step(-1); if (e.key === 'ArrowRight') step(1); });
+  $('note').textContent = `Boxes are the detector's own output (no tracking, no scene logic). Solid = at or above the cutoff the engine uses (objects ${D.run.obj_min}, people ${D.run.person_min}); dashed = between 0.25 and the cutoff. ` +
+    `Kept classes: ${D.run.kept_classes.join(', ')}. A box here is a detection, not proof of a violation.`;
+
+  clipButtons(); classToggles(); render();
+})();
+</script>
+</body>
+</html>

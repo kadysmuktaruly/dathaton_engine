@@ -54,12 +54,20 @@ def scan_times(duration: float) -> list[float]:
     return [round(min(k * STEP_S + 0.5, duration - 0.1), 2) for k in range(n)]
 
 
-def _key(video: str) -> str:
+def _video_md5(video: str) -> str:
     h = hashlib.md5()
     with open(video, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    return f"{h.hexdigest()[:16]}_{PROMPT_VERSION}_s{STEP_S:g}_m{MAX_FRAMES}"
+    return h.hexdigest()
+
+
+def scan_key(video_md5: str, box, crop) -> str:
+    """The answers depend on the pixels asked about: the desk crop box and the black-bar crop
+    are part of the key, so a changed desk or crop never reuses old answers."""
+    b = "-".join(str(int(v)) for v in box)
+    c = "-".join(str(int(v)) for v in crop)
+    return f"{video_md5[:16]}_{PROMPT_VERSION}_s{STEP_S:g}_m{MAX_FRAMES}_b{b}_c{c}"
 
 
 def ask_frames(video: str, times: list[float], box, crop, budget: vlm.Budget | None = None) -> list[dict]:
@@ -78,12 +86,14 @@ def ask_frames(video: str, times: list[float], box, crop, budget: vlm.Budget | N
 
 def scan(video: str, perc, scene, budget: vlm.Budget | None = None, use_cache: bool | None = None) -> pd.DataFrame:
     use_cache = config.USE_CACHE if use_cache is None else use_cache
-    cache = config.CACHE_DIR / "scan" / f"{_key(video)}.json"
-    if use_cache and cache.exists():
-        return pd.DataFrame(json.loads(cache.read_text()))
     crop = perc.info.crop
     w, h = crop[2] - crop[0], crop[3] - crop[1]
     box = desk_crop_box(scene, w, h)
+    cache = config.CACHE_DIR / "scan" / f"{scan_key(_video_md5(video), box, crop)}.json"
+    if use_cache and cache.exists():
+        df = pd.DataFrame(json.loads(cache.read_text()), columns=["t"] + FLAGS)
+        df.attrs["box"] = box
+        return df
     t0 = time.time()
     times = scan_times(perc.info.duration)
     # coarse-to-fine: every other frame first, so a tight budget still covers the whole clip

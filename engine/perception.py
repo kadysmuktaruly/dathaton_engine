@@ -2,7 +2,9 @@
 
 Output is one table with a row per detection:
   t, frame_idx, kind ('obj' | 'person'), cls, conf, x0, y0, x1, y1, track_id, kps (17x3 flat, persons only)
-Coordinates are in the cropped frame's pixels. Results are cached per (video md5, settings).
+Coordinates are in the cropped frame's pixels. Results are cached per (video md5, settings,
+detector). The detector is the stock COCO model unless ENGINE_DETECTOR_PATH names a local
+fine-tuned checkpoint (see config.detector_source).
 """
 from __future__ import annotations
 
@@ -17,16 +19,58 @@ import numpy as np
 import pandas as pd
 
 from engine import config
+from engine.classes import IGNORED, ROLES, role_map, runtime_keep  # noqa: F401  (ROLES re-exported)
 from engine.video import VideoInfo, iter_frames_at, probe, sample_times
 
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-# COCO classes we keep (names as RT-DETR's id2label spells them)
-KEEP = {"person", "laptop", "handbag", "backpack", "suitcase", "cup", "cell phone", "diningtable",
-        "dining table", "tvmonitor", "tv", "chair", "book", "bottle", "remote", "keyboard", "mouse"}
 PERSON = "person"
 DET_THRESH = 0.25  # TUNE: low on purpose, small objects at 464 px
+
+PERSON_MIN = 0.40     # TUNE: people below this are dropped
+OBJ_MIN = 0.50        # TUNE: object boxes at or above this are 'confident' (reported)
+# An anchor cluster's top 10% of frames must reach this. Stock look-alikes for the counting
+# machine score low, so their level is lower.
+ANCHOR_MIN = {"laptop": 0.50, "desk": 0.50, "table": 0.50, "counting_machine": 0.50,  # TUNE
+              "machine_like": 0.40, "safe": 0.50}
+CANDIDATE_MIN = 0.25  # TUNE: weaker object boxes still go into anchor clustering
+
+
+def filter_detections(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep classes that map to a role; add `role` and `confident` columns.
+
+    People below PERSON_MIN and objects below CANDIDATE_MIN are dropped. Objects between
+    CANDIDATE_MIN and OBJ_MIN stay (scene anchors cluster them) but are not confident.
+    """
+    df = df.assign(role=df.cls.map(role_map()))  # `cls` stays as detected (e.g. safe_open vs safe)
+    df = df[df.role.notna()]
+    is_p = df.kind == "person"
+    keep = (is_p & (df.conf >= PERSON_MIN)) | (~is_p & (df.conf >= CANDIDATE_MIN))
+    df = df[keep]
+    df = df.assign(confident=(df.kind == "person") | (df.conf >= OBJ_MIN))
+    return df.reset_index(drop=True)
+
+
 POSE_BATCH_MIN_H = 30  # px; skip pose for tiny boxes
+MIN_BOX_PX = 2.0       # boxes thinner than this after clipping are dropped
+
+
+def clip_box(b, w: int, h: int) -> np.ndarray | None:
+    """Clip an xyxy box to the frame; None if it is degenerate after clipping."""
+    x0, y0, x1, y1 = (float(v) for v in b)
+    x0, x1 = min(max(x0, 0.0), w), min(max(x1, 0.0), w)
+    y0, y1 = min(max(y0, 0.0), h), min(max(y1, 0.0), h)
+    if x1 - x0 < MIN_BOX_PX or y1 - y0 < MIN_BOX_PX:
+        return None
+    return np.array([x0, y0, x1, y1], dtype=np.float32)
+
+
+def clip_df(df: pd.DataFrame, w: int, h: int) -> pd.DataFrame:
+    """clip_box for a detection table (cached results were written before clipping existed)."""
+    if df.empty:
+        return df
+    df = df.assign(x0=df.x0.clip(0, w), x1=df.x1.clip(0, w), y0=df.y0.clip(0, h), y1=df.y1.clip(0, h))
+    return df[((df.x1 - df.x0) >= MIN_BOX_PX) & ((df.y1 - df.y0) >= MIN_BOX_PX)].reset_index(drop=True)
 
 
 @dataclass
@@ -35,26 +79,31 @@ class Perception:
     times: list[float]
     df: pd.DataFrame
     timings: dict = field(default_factory=dict)
+    labels: frozenset | None = None  # detector class names; None = stock COCO detector
 
 
 class Models:
     """Loads models once; reuse across videos (API worker keeps one instance)."""
 
-    def __init__(self, device: str | None = None):
+    def __init__(self, device: str | None = None, pose: bool = True):
         import torch
         from transformers import RTDetrImageProcessor, RTDetrV2ForObjectDetection
-        from rtmlib import RTMPose
 
         self.torch = torch
         self.device = device or ("mps" if torch.backends.mps.is_available() else
                                  "cuda" if torch.cuda.is_available() else "cpu")
-        self.proc = RTDetrImageProcessor.from_pretrained(config.DETECTOR_REPO)
-        self.det = RTDetrV2ForObjectDetection.from_pretrained(config.DETECTOR_REPO).to(self.device).eval()
-        self.id2label = self.det.config.id2label
-        onnx = glob.glob(str(config.WEIGHTS_DIR / "rtmpose" / "**" / "end2end.onnx"), recursive=True)
-        if not onnx:
-            raise FileNotFoundError("RTMPose weights missing: run `python -m tools.download_weights`")
-        self.pose = RTMPose(onnx[0], model_input_size=(192, 256), backend="onnxruntime", device="cpu")
+        self.source = config.detector_source()  # raises if ENGINE_DETECTOR_PATH is bad
+        self.proc = RTDetrImageProcessor.from_pretrained(self.source)
+        self.det = RTDetrV2ForObjectDetection.from_pretrained(self.source).to(self.device).eval()
+        self.id2label = {int(k): str(v) for k, v in self.det.config.id2label.items()}
+        self.keep = runtime_keep(self.id2label)
+        self.pose = None
+        if pose:  # the detector-only inspection tool skips pose
+            from rtmlib import RTMPose
+            onnx = glob.glob(str(config.WEIGHTS_DIR / "rtmpose" / "**" / "end2end.onnx"), recursive=True)
+            if not onnx:
+                raise FileNotFoundError("RTMPose weights missing: run `python -m tools.download_weights`")
+            self.pose = RTMPose(onnx[0], model_input_size=(192, 256), backend="onnxruntime", device="cpu")
 
     def detect(self, frames_rgb: list[np.ndarray]) -> list[list[tuple[str, float, np.ndarray]]]:
         torch = self.torch
@@ -64,14 +113,26 @@ class Models:
             sizes = [f.shape[:2] for f in frames_rgb]
             res = self.proc.post_process_object_detection(out, threshold=DET_THRESH, target_sizes=sizes)
         batch = []
-        for r in res:
+        for r, (h, w) in zip(res, sizes):
             dets = []
             for s, l, b in zip(r["scores"].cpu().numpy(), r["labels"].cpu().numpy(), r["boxes"].cpu().numpy()):
-                name = self.id2label[int(l)]
-                if name in KEEP:
+                name = self.id2label.get(int(l))
+                if name not in self.keep:
+                    continue
+                b = clip_box(b, w, h)
+                if b is not None:
                     dets.append((name, float(s), b))
             batch.append(dets)
         return batch
+
+
+def cache_key(video_md5: str, fps: float, fingerprint: str, thresh: float = DET_THRESH) -> str:
+    """Stock detector at the default threshold keeps the old key (existing caches stay valid);
+    any other detector or threshold gets its own cache."""
+    key = f"{video_md5[:16]}_fps{fps:g}_v2"
+    if fingerprint != "stock" or thresh != 0.25:
+        key += f"_d{fingerprint[:10]}_th{thresh:g}"
+    return key
 
 
 def _cache_path(video: Path, fps: float) -> Path:
@@ -79,7 +140,7 @@ def _cache_path(video: Path, fps: float) -> Path:
     with open(video, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    key = f"{h.hexdigest()[:16]}_fps{fps:g}_v2"
+    key = cache_key(h.hexdigest(), fps, config.detector_fingerprint())
     return config.CACHE_DIR / "perception" / f"{key}.parquet"
 
 
@@ -94,8 +155,14 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
     cache = _cache_path(video, fps)
     tcache = cache.with_suffix(".times.npy")
     use_cache = config.USE_CACHE if use_cache is None else use_cache
+    fw, fh = info.crop[2] - info.crop[0], info.crop[3] - info.crop[1]
+    if models is not None and models.source != config.detector_source():
+        raise ValueError(f"loaded detector {models.source} != selected {config.detector_source()} "
+                         "(ENGINE_DETECTOR_PATH changed after the models were loaded)")
     if use_cache and cache.exists() and tcache.exists():
-        return Perception(info, np.load(tcache).tolist(), pd.read_parquet(cache), {"cached": True})
+        df = clip_df(pd.read_parquet(cache), fw, fh)
+        return Perception(info, np.load(tcache).tolist(), filter_detections(df),
+                          {"cached": True}, config.detector_labels())
 
     models = models or Models()
     tracker = sv.ByteTrack(frame_rate=int(round(fps)), lost_track_buffer=int(4 * fps),  # TUNE
@@ -158,5 +225,6 @@ def run(video: str | Path, models: Models | None = None, fps: float = config.SAM
     cache.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(cache)
     np.save(tcache, np.array(actual))
-    return Perception(info, actual, df, {"decode_s": round(t_dec, 2), "detect_s": round(t_det, 2),
-                                        "pose_s": round(t_pose, 2), "frames": len(times)})
+    return Perception(info, actual, filter_detections(df), {"decode_s": round(t_dec, 2), "detect_s": round(t_det, 2),
+                                        "pose_s": round(t_pose, 2), "frames": len(times)},
+                      None if models.source == config.DETECTOR_REPO else frozenset(models.id2label.values()))
