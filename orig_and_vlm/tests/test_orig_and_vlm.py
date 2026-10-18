@@ -30,6 +30,15 @@ def test_closeout_drops_only_failed_leave_alarms(monkeypatch):
     assert seen[0][1] == (180, 220, 464, 364)  # laptop box with room around it, clipped to the frame
 
 
+def test_closeout_lifts_a_gated_alarm_it_confirms(monkeypatch):
+    from engine.rules import b5
+    monkeypatch.setattr(closeout, "check", lambda *a: {"keep": True, "why": "left exposed: screen"})
+    gated = _leave(5.0, 6.0)
+    gated.score = b5.NO_EVIDENCE_SCORE  # fine-tuned detector saw no open safe
+    kept, _ = closeout.filter_events("v.mov", PERC, FA, [gated])
+    assert kept[0].score == b5.LEAVE_SCORE and kept[0].info["closeout_lifted"]
+
+
 def test_closeout_keeps_alarm_without_budget(monkeypatch):
     monkeypatch.setattr(closeout, "check", lambda *a: (_ for _ in ()).throw(AssertionError("must not run")))
     budget = SimpleNamespace(ok=lambda need: False)

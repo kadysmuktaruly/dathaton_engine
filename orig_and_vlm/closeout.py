@@ -61,7 +61,14 @@ def check(video: str, perc, desk_box, lap_box, t_exit: float) -> dict:
 
 
 def filter_events(video: str, perc, fa, events: list, budget=None) -> tuple[list, list[dict]]:
-    """Drop B5 'cashier_left_room' alarms that fail the close-out check. Returns (kept, debug)."""
+    """Drop B5 'cashier_left_room' alarms that fail the close-out check. Returns (kept, debug).
+
+    With a fine-tuned detector (it has a `safe_open` class) engine/rules/b5.py keeps a departure
+    below the verdict threshold unless the detector also sees an open safe. A passed close-out
+    check (screen on / items left / safe open) is that evidence too, so it lifts the alarm back to
+    the rule's normal score; with the stock detector the score is already there.
+    """
+    from engine.rules import b5
     from engine.vlm_scan import desk_crop_box
     crop = perc.info.crop
     w, h = crop[2] - crop[0], crop[3] - crop[1]
@@ -79,5 +86,8 @@ def filter_events(video: str, perc, fa, events: list, budget=None) -> tuple[list
         ev.info["closeout"] = r
         dbg.append({"t": ev.start, **r})
         if r["keep"]:
+            if ev.score < b5.LEAVE_SCORE:
+                ev.score = b5.LEAVE_SCORE
+                ev.info["closeout_lifted"] = True
             kept.append(ev)
     return kept, dbg
