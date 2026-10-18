@@ -275,8 +275,9 @@ class EngineService:
 
     def details(self, job_id: str):
         with self.lock:
-            self.get(job_id)
-            job = self.jobs[job_id]
+            job = self.jobs.get(job_id)
+            if job is None:
+                raise ServiceError(404, "JOB_NOT_FOUND", "Unknown engine job")
             return {"partial": job["partial"], "status": job["status"]}
 
     def cancel(self, job_id: str):

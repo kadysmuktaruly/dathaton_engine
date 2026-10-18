@@ -1,4 +1,5 @@
-# Copy into datathon; apply together with its existing docker-compose.yml.
+# Legacy override for the old backend-only stack.
+# Updated datathon includes the engine in its main Compose stack; do not apply this override.
 services:
   api:
     environment:

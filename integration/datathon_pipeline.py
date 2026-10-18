@@ -1,4 +1,6 @@
-"""Copy to datathon/app/pipeline.py; see docs/deployment.md for Settings fields.
+"""Legacy blocking adapter for the earlier thread-based backend.
+
+The updated datathon backend ships an async adapter; do not overwrite it with this file.
 
 Runs in the existing APScheduler task. All waits, uploads and polling share one
 deadline, shorter than JOB_TIMEOUT_SEC. Cancels unfinished engine work on failure.

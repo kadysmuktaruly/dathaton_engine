@@ -59,50 +59,22 @@ For native Python, use Python 3.11, `uv sync --locked`, download the same weight
 environment variables explicitly (uvicorn does not read .env.deploy automatically),
 then `uv run uvicorn api.main:app --host 127.0.0.1 --port 8001 --workers 1`.
 
-## Connect the existing datathon backend
+## Connect the updated datathon backend
 
-These edits belong in the separate datathon repository. This branch supplies the adapter;
-it does not modify that repository automatically.
+The datathon backend now contains its own async adapter in app/pipeline.py and a FIFO
+APScheduler queue with one active slot. Its main docker-compose.yml builds this engine
+checkout as a private service and injects the same ENGINE_API_KEY into both services.
+Follow datathon/deploy/README.md for the combined deployment. Place this branch at
+../dathaton_engine_deploy relative to datathon, or set ENGINE_SOURCE_DIR there.
 
-1. Copy integration/datathon_pipeline.py to datathon/app/pipeline.py.
-2. In datathon run `uv add httpx` (needed in production, not only the dev group).
-3. Add these fields inside app/config.py's Settings class:
+Use the combined backend Compose stack instead of starting a second standalone engine
+Compose stack. The backend uses http://engine:8001 in Docker, or ENGINE_URL pointing at
+this engine for native development. It retrieves /analysis results, reuses its backend
+UUID for engine jobs, and cancels unfinished inference during timeout/shutdown.
 
-```python
-engine_url: str = "http://127.0.0.1:8001"
-engine_api_key: str = ""
-engine_timeout_sec: float = 220
-```
-
-4. Add these entries to datathon's existing .env:
-
-```dotenv
-ENGINE_URL=http://127.0.0.1:8001
-ENGINE_API_KEY=the-same-secret-as-engine
-ENGINE_TIMEOUT_SEC=220
-JOB_TIMEOUT_SEC=240
-WORKER_CONCURRENCY=1
-```
-
-5. For a native backend run `make dev`. For its Docker deployment, copy
-integration/datathon.compose.yaml into datathon and run there:
-
-```bash
-docker compose -f docker-compose.yml -f datathon.compose.yaml up -d --build
-```
-
-The override adds the API to the engine's `datathon-engine` network and uses
-http://engine:8001, while preserving its existing Postgres network. Start the engine
-Compose project first to create that network. Inside a container, localhost would mean
-the backend container, not the engine. Keep the frontend pointed at datathon on :8000:
-
-```bash
-VITE_USE_MOCK_API=false BACKEND_URL=http://127.0.0.1:8000 npm run dev
-```
-
-Existing stored mock jobs remain mock results; submit a new video to test the adapter.
-The adapter's model picker uses kadys-model. The engine does not serve backend job
-history, playback, or frontend routes. The backend continues to own those endpoints.
+The integration/datathon_pipeline.py blocking adapter and datathon.compose.yaml override
+are retained as legacy examples for the earlier thread-based backend. Do not copy them
+into the updated async backend; its adapter and main Compose stack are already wired.
 
 ## Private API contract
 

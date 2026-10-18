@@ -94,6 +94,19 @@ def test_webm_and_analysis_contract(client):
     assert not list(client.app.state.service.settings.root.glob("uploads/*"))
 
 
+def test_metadata_polling_does_not_read_evidence_payload(client, monkeypatch):
+    job_id = post(client).json()["job_id"]
+    wait_for(lambda: finished(client, job_id))
+
+    def unexpected_read(_job_id):
+        raise AssertionError("Status polling should not deserialize base64 evidence")
+
+    monkeypatch.setattr(client.app.state.service, "_read", unexpected_read)
+    response = client.get(f"/api/v1/jobs/{job_id}/metadata", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {"partial": False, "status": "done"}
+
+
 def test_one_video_at_a_time_and_uuid_retry(client):
     job_id = uuid.uuid4().hex
     assert post(client, b"slow", client_job_id=job_id).json()["job_id"] == job_id
