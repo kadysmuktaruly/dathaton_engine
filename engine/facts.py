@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from engine import roles
 from engine.scene import Scene, build_scene, foot_point, in_room_mask, person_filter_reasons
 
 SMOOTH_S = 1.0  # TUNE: window for the smoothed head count
@@ -14,14 +15,17 @@ SMOOTH_S = 1.0  # TUNE: window for the smoothed head count
 @dataclass
 class Facts:
     scene: Scene
-    persons: pd.DataFrame   # one row per in-room person per frame (+ foot, rel. coords, is_cashier)
-    frames: pd.DataFrame    # one row per sampled frame: t, n_room, n_smooth, cashier_present, ...
+    persons: pd.DataFrame   # one row per in-room person per frame (+ foot, d_seat, d_desk, role)
+    frames: pd.DataFrame    # one row per sampled frame: t, n_room, n_smooth, seat_occupied, cashier_at_seat
     objects: pd.DataFrame   # confident object detections (>= OBJ_MIN), for object rules
     seat: tuple[float, float] | None  # cashier's usual foot position
     video: str | None = None           # source video (for rules that look at pixels)
     perc: object | None = None         # perception result (times, info, raw detections)
     scan: pd.DataFrame | None = None   # VLM desk-scan flags per sampled frame (if run)
     person_log: pd.DataFrame | None = None  # every candidate person box + why it was (not) counted
+    sessions: list | None = None       # visitor sessions (engine.roles.Session): clients and the collector
+    hands: pd.DataFrame | None = None  # per frame: cashier's wrist at machine / laptop / safe
+    checks: dict | None = None         # targeted VLM answers (engine.vlm_checks), if run
 
 
 def _rolling_median(x: np.ndarray, t: np.ndarray, win: float) -> np.ndarray:
@@ -137,6 +141,7 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
     else:
         room["d_desk"] = np.inf
 
+    room = roles.split_people(room)
     t_arr = np.unique(np.array(times, dtype=float))
     n_room = room.groupby("t").size().reindex(t_arr, fill_value=0).to_numpy()
     frames = pd.DataFrame({"t": t_arr, "n_room": n_room})
@@ -144,7 +149,13 @@ def build(df: pd.DataFrame, times: list[float], frame_w: int, frame_h: int,
     # who is at the seat (cashier position) in each frame
     at_seat = room[room.d_seat <= 0.6].groupby("t").size()  # TUNE
     frames["seat_occupied"] = frames.t.map(at_seat).fillna(0).to_numpy() > 0
+    frames["cashier_at_seat"] = roles.cashier_at_seat(room, t_arr).to_numpy()
     obj = df[df.kind == "obj"]
     if "confident" in obj:
         obj = obj[obj.confident]  # weaker boxes only feed scene anchors
-    return Facts(scene, room, frames, obj.copy(), seat, video, perc, person_log=log)
+    obj = obj.copy()
+    duration = float(perc.info.duration) if perc is not None else (float(t_arr[-1]) if len(t_arr) else 0.0)
+    sess = roles.sessions(room, scene.person_h_ref, duration)
+    roles.tag_collectors(sess, obj)
+    return Facts(scene, room, frames, obj, seat, video, perc, person_log=log, sessions=sess,
+                 hands=roles.hands(room, scene, t_arr))

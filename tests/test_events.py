@@ -13,5 +13,5 @@ def test_segments_hysteresis():
 
 
 def test_merge_same_code_close_events():
-    ev = merge([Event("B1", 5, 6, 0.4), Event("B1", 7, 8, 0.7), Event("C1", 7, 8, 0.5), Event("B1", 20, 21, 0.5)])
-    assert [(e.code, e.start, e.end, e.score) for e in ev] == [("B1", 5, 8, 0.7), ("C1", 7, 8, 0.5), ("B1", 20, 21, 0.5)]
+    ev = merge([Event("B1", 5, 6, 0.4), Event("B1", 7, 8, 0.7), Event("A7", 7, 8, 0.5), Event("B1", 20, 21, 0.5)])
+    assert [(e.code, e.start, e.end, e.score) for e in ev] == [("B1", 5, 8, 0.7), ("A7", 7, 8, 0.5), ("B1", 20, 21, 0.5)]

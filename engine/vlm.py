@@ -156,7 +156,7 @@ def catchall(video_path, perc, fa, budget=None, step: float = CATCHALL_STEP_S) -
     from engine import catalog
     from engine.video import iter_frames_at
     codes = "; ".join(f"{v['code']} — {v['type']}" for v in catalog.load()["violations"]
-                      if v["code"] not in {"C3", "X0"})
+                      if v.get("active"))
     fr = fa.frames
     busy = fr[fr.n_smooth >= 2].t.to_numpy()
     if len(busy) == 0:

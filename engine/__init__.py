@@ -6,13 +6,25 @@ import time
 import uuid
 from pathlib import Path
 
-SEEN_TEXT = {  # rule-based 'что видно' sentences (the VLM may replace them later)
-    ("C1", "entered_empty_room"): "в помещение кассы, где не было кассира, вошёл человек и прошёл к рабочему месту кассира",
-    ("C1", "third_person"): "во время обслуживания клиента в помещение кассы вошёл ещё один человек и подошёл к столу кассира",
-    ("C1", "to_staff_side"): "в помещение кассы вошёл посторонний и прошёл на сторону рабочего места кассира",
-    ("C2", "door_left_open"): "кассир вошёл в помещение кассы и оставил дверь открытой; дверь остаётся открытой во время работы",
-    ("B5", "cashier_left_room"): "кассир покинул помещение кассы, рабочее место и сейф остались без присмотра",
-    ("B5", "safe_open_unattended"): "кассир покинул помещение кассы, сейф остался открытым без присмотра",
+SEEN_TEXT = {  # rule-based 'что видно' sentences (the VLM may replace them); roles only, no unseen claims
+    ("C2", "door_left_open"): "человек прошёл в помещение кассы, а дверь кассы осталась открытой",
+    ("C2", "visitor_through_open_door"): "дверь кассы осталась открытой, и через неё в помещение кассы прошёл посетитель",
+    ("B5", "safe_open_while_working"): "сейф остаётся открытым, пока кассир работает за столом",
+    ("B5", "safe_open_cashier_left"): "кассир покинул помещение кассы, сейф остался открытым",
+    ("B1", "cash_left_cashier_away"): "на столе кассира остались наличные деньги без присмотра, кассир отошёл от рабочего места",
+    ("B1", "bag_left_cashier_away"): "на столе кассира осталась инкассаторская сумка, кассир покинул помещение кассы",
+    ("B1", "cash_open_new_client"): "на столе открыто лежат наличные деньги, когда к кассе подходит следующий клиент",
+    ("B8", "stamps_left_cashier_away"): "кассир покинул помещение кассы, печати остались на столе",
+    ("B9", "laptop_active_cashier_left"): "кассир покинул помещение кассы, ноутбук остался открытым и включённым",
+    ("A7", "second_client_while_first_present"): "кассир принимает второго клиента, пока первый клиент ещё находится у кассы",
+    ("A1", "client_left_during_count"): "клиент уходит, пока его деньги ещё пересчитываются на счётной машине",
+    ("A6", "no_client_id"): "кассир принимает деньги клиента; в кадре не видно, чтобы клиент передавал удостоверение личности",
+    ("A2", "uv_detector_not_used"): "кассир пересчитывает наличные; в кадре не видно проверки купюр на УФ-детекторе, который стоит на столе",
+    ("A4", "cashier_left_client_present"): "кассир покинул помещение кассы, пока клиент находится у кассы и на столе лежат деньги",
+    ("D7", "bag_taken_no_id_check"): "кассир принимает инкассаторскую сумку; в кадре не видно, чтобы кассир проверял удостоверение или доверенность инкассатора",
+    ("D6", "bag_cash_to_safe_no_count"): "кассир убирает деньги из инкассаторской сумки в сейф; в кадре не видно пересчёта на счётной машине",
+    ("B3", "personal_items"): "на рабочем месте кассира лежат личные вещи (сумка или верхняя одежда)",
+    ("B3", "drink_next_to_cash"): "кассир ставит напиток на рабочее место рядом с наличными деньгами",
 }
 DEFAULT_SEEN = "в кадре видны действия, похожие на отступление от кассовых процедур"
 VERDICT_THRESHOLD = 0.3  # TUNE: low on purpose (recall first)
@@ -29,7 +41,8 @@ def _get_models():
 
 
 SCAN_BUDGET_S = 18.0   # TUNE: VLM desk scan share of the per-video VLM budget
-VLM_BUDGET_S = 25.0    # hard per-video VLM budget
+CHECKS_BUDGET_S = 22.0  # TUNE: targeted questions (departures, UV detector)
+VLM_BUDGET_S = 60.0    # hard per-video VLM budget
 
 
 def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, budget=None):
@@ -42,10 +55,16 @@ def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, bu
     fa = F.build(perc.df, perc.times, frame_w, frame_h, video=video, perc=perc)
     timings = {}
     if budget is not None and video is not None:
-        from engine import vlm, vlm_scan
+        from engine import roles, vlm, vlm_checks, vlm_scan
         t0 = time.time()
         fa.scan = vlm_scan.scan(video, perc, fa.scene, vlm.Budget(min(SCAN_BUDGET_S, budget.left())))
+        roles.tag_collectors(fa.sessions, fa.objects, fa.scan)
         timings["scan"] = round(time.time() - t0, 2)
+        t0 = time.time()
+        cb = vlm.Budget(min(CHECKS_BUDGET_S, budget.left()))
+        fa.checks = vlm_checks.run(video, perc, fa, cb)
+        fa.checks["uv"] = vlm_checks.run_uv(video, perc, fa, cb)
+        timings["checks"] = round(time.time() - t0, 2)
     events = []
     for name, fn in RULES.items():
         t0 = time.time()
@@ -67,13 +86,13 @@ def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, bu
 
 
 def _resolve(events):
-    """B1 'cash left when the cashier walked away' explains the same departure better than the
-    generic B5 'leave' candidate, so the B5 one is dropped."""
-    b1 = [e.info.get("t_depart", e.start) for e in events
-          if e.code == "B1" and e.info.get("reason") == "cash_left_cashier_away"]
-    return [e for e in events
-            if not (e.code == "B5" and e.info.get("reason") == "cashier_left_room"
-                    and any(abs(e.start - t) <= 2.0 for t in b1))]
+    """One violation per (code, moment): the same departure can be found by two B1 signals."""
+    out = []
+    for e in sorted(events, key=lambda e: -e.score):
+        if any(o.code == e.code and abs(o.start - e.start) <= 2.0 for o in out):
+            continue
+        out.append(e)
+    return out
 
 
 def _add_cashier_boxes(fa, ev):
@@ -168,6 +187,8 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
                      "machine": fa.scene.machine and fa.scene.machine.as_list(),
                      "safe": fa.scene.safe and fa.scene.safe.as_list(),
                      "seat": fa.seat, "notes": fa.scene.notes, "provenance": fa.scene.provenance},
+           "sessions": [vars(x) for x in (fa.sessions or [])],
+           "checks": fa.checks,
            "events": debug_events,
            "dropped": [{"code": e.code, "start": e.start, "score": e.score, "info": e.info}
                        for e in events if e not in kept]}

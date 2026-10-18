@@ -14,7 +14,8 @@ CLASSES = NEW_CLASSES + COCO_CLASSES
 
 # Name of each kept COCO class in the stock PekingU/rtdetr_v2_r18vd id2label.
 # id_card (a client's ID document) starts from the stock "cell phone" row: both are small
-# rectangles held in a hand. Phones are rare here and are labeled id_card too.
+# rectangles held in a hand. Phones are rare here and were labeled id_card too, so an id_card box
+# may be a phone; docs/master-document.md counts only the ID card as a client ID (known limit).
 STOCK_NAME = {c: c for c in COCO_CLASSES}
 STOCK_NAME["id_card"] = "cell phone"
 

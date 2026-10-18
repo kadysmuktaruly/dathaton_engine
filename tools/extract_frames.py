@@ -70,7 +70,7 @@ def layout_of(clip_id: str) -> str:
 
 
 # Clips that are the only/main example of a rare object state stay in train:
-# X-17 = collection bag handed over (D1), X-20 = safe door left open (B5).
+# X-17 = collection bag taken without an ID check (D7), X-20 = safe door left open (B5).
 TRAIN_ONLY = {"X-17", "X-20"}
 
 

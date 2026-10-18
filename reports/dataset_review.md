@@ -82,3 +82,31 @@ X-32 and X-33 are **C2 (cash-room door left open)**, not C1. The clean clip X-31
 
 ### Correction (2026-10-17, confirmed by the user)
 X-1 @ 22 s: the violation is that the cashier hands cash to the client **without the client showing an ID first**. This conflicts with `rules/rules_catalog.json`, which lists «Проверка документа клиента» (Правила № 231, п. 19 пп. 1), п. 31 пп. 1)) under `do_not_flag`. The catalog needs a matching violation entry before the engine can report this type.
+
+## Master document (2026-10-18)
+[`docs/master-document.md`](../docs/master-document.md) replaces the types above. It takes priority over this review, `tools/eval.py` and the catalog's `do_not_flag` list. Setup: one cashier works alone; the other people are clients or the collector; a client ID is the `id_card` only; collection bags are always intact.
+
+| Clip @ s | Type now | Was | Why |
+|---|---|---|---|
+| X-1 @ 22 | A3 | A3 | issued part handed over without its own recount |
+| X-2 @ 10 | A6 | A5 | cash taken without the client's ID card |
+| X-4 @ 57, @ 68 (= X-47) | B1, B1 | B1, A2 | previous client's cash on the desk while the next one is served |
+| X-11 @ 18 | B9 | B5 | cashier leaves with the laptop open and active |
+| X-13 @ 47 | D6 | B7 | bag opened, cash into the safe with no count and no laptop entry |
+| X-15 @ 15 | B1 | B1 | sealed bag left on the desk, cashier leaves |
+| X-17 @ 7 | D7 | D1 | bag taken without checking the collector's ID / power of attorney |
+| X-18 @ 20 | A7 | C1 | 2nd client's cash taken while the 1st is still there |
+| X-20 @ 5 | B5 | B5 | safe left open while working at the desk |
+| X-22 @ 14 | B5 | B5 | key left in the safe lock when leaving (clean X-23 takes it out) |
+| X-24 @ 8 | B8 | B5 | stamps left on the desk when leaving (clean X-25) |
+| X-26 @ 9 | B1 | B1 | cash left on the desk, cashier leaves |
+| X-28 @ 7 | B9 | B5 | not in the master document; the user chose B9 (laptop left on) |
+| X-30 @ 13 | C2 | C1 | door left open; a man walks in through it at 13 s |
+| X-32 @ 5, X-33 @ 6 | C2 | C2 | door left open after the cashier enters |
+| X-34 @ 13 | A1 | A1 | client leaves while the cash is still being counted |
+| X-38 @ 33 | B1 | B1 | previous client's cash on the desk as the next client comes in |
+| X-40 @ 17 | B3 | B3 | bag and coat on the desk |
+| X-44 @ 16 | A2 | B7 | a UV detector is on the desk but not used (clean X-43 uses it) |
+| X-46 @ 11 | B3 | X0 | coffee cup next to cash |
+
+No longer reported: C1, D1, B7, X0 (and A5, B2, B4, B6, C3, D2–D5, E1). They stay in the catalog as reference only.

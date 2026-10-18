@@ -1,12 +1,16 @@
-"""C2: the cash-room door is left open during work.
+"""C2: the cash-room door is left open after someone passes (docs/master-document.md).
 
 Signal: a large persistent change of the static background on the back-wall side of the room
 (farther than the desk's back edge) between the start and the end of the clip, with people
 masked out. A door that is opened and closed again leaves no change (clean X-31); a door left
-open leaves a door-sized blob (X-32, X-33).
+open leaves a door-sized blob (X-30, X-32, X-33). It is flagged even if nobody else comes in.
+The door must have been opened by someone entering an empty room (the cashier arriving): every
+training case is that, and changes that start while the cashier is already inside come from
+clients arriving on clean clips (X-5, X-18, X-39), not from a door left open.
 
-Timecode = onset of that change (catalog: «момент, когда дверь открыта»), found by comparing
-each frame's blob region to the 'before' background.
+Timecode: the first visitor who walks in through the open door and reaches the desk (X-30: the
+cashier left the door open at 3 s, a man walks in at 13 s); otherwise the moment the door is
+fully open (X-32, X-33: the cashier walks in and leaves it open).
 """
 from __future__ import annotations
 
@@ -15,6 +19,7 @@ import numpy as np
 from engine import bgchange
 from engine.events import Event
 from engine.facts import Facts
+from engine.roles import session_rows
 from engine.video import iter_frames_at
 
 MIN_AREA_REL = 0.05   # TUNE: blob area / person_h_ref^2
@@ -38,7 +43,6 @@ def detect(f: Facts) -> list[Event]:
     if ch.mean() > LIGHTING_FRAC:
         return []  # most of the frame changed: lights switched or camera moved, not a door
     h2 = max(f.scene.person_h_ref, 1.0) ** 2
-    fr = f.frames
     events = []
     for b in bgchange.blobs(ch):
         x0, y0, x1, y1 = b["box"]
@@ -49,17 +53,35 @@ def detect(f: Facts) -> list[Event]:
         t_on = _onset(video, perc, ch, b, before)
         if t_on is None:
             continue
-        # the door was opened by someone entering an EMPTY room (the cashier arriving and
-        # leaving it open); doors opened by visitors while the cashier is in are C1's job
-        around = fr[(fr.t >= t_on - 3.0) & (fr.t <= t_on + 1.0)]
+        around = f.frames[(f.frames.t >= t_on - 3.0) & (f.frames.t <= t_on + 1.0)]
         if len(around) and around.n_smooth.min() > 0:
-            continue
-        events.append(Event("C2", t_on, d, min(0.9, 0.5 + b["area"] / h2), evidence_t=[t_on],
-                            boxes={t_on: [("дверь", b["box"])]},
-                            info={"reason": "door_left_open", "blob_area_rel": round(b["area"] / h2, 3),
+            continue  # the room was not empty: no one walked in and left the door open
+        t, reason, boxes = t_on, "door_left_open", {t_on: [("дверь", b["box"])]}
+        s = first_visitor_through(f, t_on)
+        if s is not None:
+            t, reason = s.enter, "visitor_through_open_door"
+            boxes = {t: [("дверь", b["box"])] + ([("посетитель", s.first_box)] if s.first_box else [])}
+        events.append(Event("C2", t, d, min(0.9, 0.5 + b["area"] / h2), evidence_t=[t], boxes=boxes,
+                            info={"reason": reason, "t_door_open": t_on,
+                                  "blob_area_rel": round(b["area"] / h2, 3),
                                   "blob": [round(v) for v in b["box"]]}))
         break  # one door
     return events
+
+
+VISITOR_REACH_DESK = 0.5   # TUNE: d_desk (desk widths) the visitor must reach
+
+
+def first_visitor_through(f: Facts, t_open: float):
+    """First visitor session that enters after the door opened and walks up to the desk."""
+    p = f.persons
+    for s in f.sessions or []:
+        if s.enter < t_open + 1.0:
+            continue
+        rows = session_rows(p, s)
+        if len(rows) and float(rows.d_desk.min()) <= VISITOR_REACH_DESK:
+            return s
+    return None
 
 
 def _onset(video, perc, ch, blob, before) -> float | None:

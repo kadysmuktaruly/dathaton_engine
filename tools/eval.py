@@ -19,13 +19,14 @@ from pathlib import Path
 from engine import analyze, catalog, config
 from tools.labels import load_clips
 
-# User-confirmed types (reports/dataset_review.md). Best guesses for the unclear ones.
+# Expected type per labeled timecode (docs/master-document.md, section 2a; X-28 = B9 by the user;
+# X-47 is a copy of X-4, so X-4@68 is X-47's B1).
 CONFIRMED = {
-    ("X-4", 57): "B1", ("X-15", 15): "B1", ("X-26", 9): "B1", ("X-38", 33): "B1",
-    ("X-18", 20): "C1", ("X-30", 13): "C1", ("X-32", 5): "C2", ("X-33", 6): "C2",
-    ("X-20", 5): "B5", ("X-11", 18): "B5", ("X-22", 14): "B5", ("X-24", 8): "B5", ("X-28", 7): "B5",
-    ("X-13", 47): "B7", ("X-44", 16): "B7", ("X-34", 13): "A1", ("X-17", 7): "D1", ("X-40", 17): "B3",
-    ("X-1", 22): "A3", ("X-2", 10): "A5", ("X-4", 68): "A2", ("X-46", 11): "X0",
+    ("X-1", 22): "A3", ("X-2", 10): "A6", ("X-4", 57): "B1", ("X-4", 68): "B1", ("X-11", 18): "B9",
+    ("X-13", 47): "D6", ("X-15", 15): "B1", ("X-17", 7): "D7", ("X-18", 20): "A7", ("X-20", 5): "B5",
+    ("X-22", 14): "B5", ("X-24", 8): "B8", ("X-26", 9): "B1", ("X-28", 7): "B9", ("X-30", 13): "C2",
+    ("X-32", 5): "C2", ("X-33", 6): "C2", ("X-34", 13): "A1", ("X-38", 33): "B1", ("X-40", 17): "B3",
+    ("X-44", 16): "A2", ("X-46", 11): "B3",
 }
 TYPE2CODE = {v["type"]: v["code"] for v in catalog.load()["violations"]}
 

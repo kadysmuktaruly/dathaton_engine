@@ -9,7 +9,6 @@ import pytest
 from engine import facts as F
 from engine.classes import CONTEXT_ROLES, runtime_keep
 from engine.perception import filter_detections, match_raw_to_tracks
-from engine.rules import b5
 from engine.scene import build_scene
 
 T = [0.0, 0.33, 0.67, 1.0]
@@ -127,18 +126,6 @@ def test_provenance_explicit_vs_proxy():
         _obj("safe", 0.8, (380, 200, 440, 330)))), 464, 848, 10)
     assert explicit.provenance == {"desk": "explicit:desk", "machine": "explicit:counting_machine",
                                    "safe": "explicit:safe"}
-
-
-def test_proxy_safe_is_never_an_open_safe(monkeypatch):
-    dep = {"t_exit": 10.0, "t_depart": 8.0, "absent_s": 3.0, "to_end": True, "box": [1, 2, 3, 4], "track": 1}
-    monkeypatch.setattr(b5, "departures", lambda f: [dep])
-    scene = SimpleNamespace(safe=object(), provenance={"safe": "proxy:tall box"})
-    objects = pd.DataFrame([(11.0, "tvmonitor", 0.9, 380, 200, 440, 330)] * 3,
-                           columns=["t", "cls", "conf", "x0", "y0", "x1", "y1"])
-    # trained-detector vocabulary: a proxy safe plus tv boxes are no evidence of an open safe
-    f = SimpleNamespace(perc=SimpleNamespace(labels=frozenset({"safe", "safe_open"})), objects=objects, scene=scene)
-    ev = b5.detect(f)[0]
-    assert ev.score == b5.NO_EVIDENCE_SCORE and ev.info["reason"] == "cashier_left_room"
 
 
 # --- 7. inspector reasons -------------------------------------------------------------------

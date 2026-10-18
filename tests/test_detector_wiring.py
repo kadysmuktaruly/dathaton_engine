@@ -10,7 +10,6 @@ import pytest
 from engine import config
 from engine.classes import CLASSES, IGNORED, NEW_CLASSES, role_of, runtime_keep
 from engine.perception import cache_key, clip_box, filter_detections  # noqa: F401
-from engine.rules import b5
 from engine.scene import build_scene
 from tools.inspect_detections import frame_rows, to_original
 
@@ -147,43 +146,6 @@ def test_scan_cache_key_changes_with_crop():
     k = scan_key(md5, (10, 20, 300, 400), (0, 0, 464, 848))
     assert k != scan_key(md5, (10, 20, 300, 420), (0, 0, 464, 848))
     assert k != scan_key(md5, (10, 20, 300, 400), (12, 0, 476, 848))
-
-
-# --- B5 evidence gate -----------------------------------------------------------------------
-
-def _facts(labels, objects):
-    cols = ["t", "cls", "conf", "x0", "y0", "x1", "y1"]
-    return SimpleNamespace(perc=SimpleNamespace(labels=labels), objects=pd.DataFrame(objects, columns=cols))
-
-
-@pytest.fixture
-def one_departure(monkeypatch):
-    dep = {"t_exit": 10.0, "t_depart": 8.0, "absent_s": 3.0, "to_end": True,
-           "box": [1, 2, 3, 4], "track": 1}
-    monkeypatch.setattr(b5, "departures", lambda f: [dep])
-
-
-def test_b5_without_open_safe_stays_below_threshold(one_departure):
-    from engine import VERDICT_THRESHOLD
-    ev = b5.detect(_facts(frozenset(CLASSES), []))[0]
-    assert ev.score + 0.15 < VERDICT_THRESHOLD     # even a VLM 'yes' cannot report it
-    assert ev.info["safe_open_frames"] == 0
-
-
-def test_b5_with_open_safe_while_empty(one_departure):
-    so = [(11.0, "safe_open", 0.7, 380, 200, 440, 330), (11.33, "safe_open", 0.8, 380, 200, 440, 330)]
-    ev = b5.detect(_facts(frozenset(CLASSES), so))[0]
-    assert ev.score == b5.LEAVE_SCORE and ev.info["reason"] == "safe_open_unattended"
-
-
-def test_b5_open_safe_before_leaving_does_not_count(one_departure):
-    so = [(5.0, "safe_open", 0.9, 380, 200, 440, 330), (6.0, "safe_open", 0.9, 380, 200, 440, 330)]
-    assert b5.detect(_facts(frozenset(CLASSES), so))[0].score == b5.NO_EVIDENCE_SCORE
-
-
-def test_b5_unchanged_with_stock_detector(one_departure):
-    ev = b5.detect(_facts(None, []))[0]
-    assert ev.score == b5.LEAVE_SCORE and ev.info["reason"] == "cashier_left_room"
 
 
 # --- objects but no person ------------------------------------------------------------------

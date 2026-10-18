@@ -16,7 +16,7 @@ def validate(res: dict) -> None:
     assert res["verdict"] in {"violation", "no_violation"}
     assert isinstance(res["violations"], list)
     assert (res["verdict"] == "violation") == (len(res["violations"]) > 0)
-    types = {v["type"] for v in catalog.load()["violations"]}
+    types = catalog.active_types()  # inactive (reference-only) codes are never reported
     for v in res["violations"]:
         assert set(v) == V_KEYS, f"violation keys {set(v)}"
         assert v["type"] in types, v["type"]
