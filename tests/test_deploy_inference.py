@@ -10,7 +10,6 @@ def test_linux_inference_worker_accepts_container_pid_one_parent(monkeypatch):
     import sys
 
     import torch
-
     from api import service
 
     messages = []
