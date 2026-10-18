@@ -5,6 +5,39 @@ from engine import config, evidence, perception, vlm, vlm_scan
 from engine.events import Event
 
 
+def test_linux_inference_worker_accepts_container_pid_one_parent(monkeypatch):
+    import ctypes
+    import sys
+
+    import torch
+
+    from api import service
+
+    messages = []
+
+    class Connection:
+        def send(self, message):
+            messages.append(message)
+
+        def recv(self):
+            raise EOFError
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(service.os, "getppid", lambda: 1)
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **kw: SimpleNamespace(prctl=lambda *a: 0))
+    monkeypatch.setattr(torch, "set_num_threads", lambda *a: None)
+    monkeypatch.setattr(torch, "set_num_interop_threads", lambda *a: None)
+    monkeypatch.setattr(perception, "Models", lambda: "loaded")
+    monkeypatch.setattr(engine, "_models", None)
+    monkeypatch.setattr(config, "USE_VLM", False)
+    service.inference_worker(Connection(), None)
+    assert messages == [("ready", None)]
+    assert engine._models == "loaded"
+
+
 def test_analyze_reports_partial_and_final_backend_data_without_changing_result(
     monkeypatch, tmp_path
 ):

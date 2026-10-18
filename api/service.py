@@ -61,7 +61,8 @@ def inference_worker(connection, _settings):
             parent = os.getppid()
             if ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL) != 0:
                 raise OSError(ctypes.get_errno(), "Could not set parent-death signal")
-            if os.getppid() != parent or parent == 1:
+            # PID 1 is a valid parent when Uvicorn is the container entrypoint.
+            if os.getppid() != parent:
                 return
         os.environ["OMP_NUM_THREADS"] = str(config.CPU_THREADS)
         os.environ["OPENBLAS_NUM_THREADS"] = str(config.CPU_THREADS)
