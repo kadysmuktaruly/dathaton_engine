@@ -1,5 +1,11 @@
 # Models and licenses
 
+Deployment branch: Linux uses the original `Qwen/Qwen3-VL-4B-Instruct` checkpoint
+through Transformers/PyTorch (float32 CPU). Apple Silicon keeps the existing MLX 4-bit
+checkpoint. Linux PyTorch/torchvision resolve from the official CPU index, and MLX is
+installed only on Apple Silicon. Existing evaluation reports describe the original MLX
+pipeline; repeat them on the Linux runtime. See `docs/deployment.md`.
+
 All models run locally. Weights are downloaded once (`uv run python -m tools.download_weights`), then the engine runs with `HF_HUB_OFFLINE=1`.
 Licenses were checked on 2026-10-17 from the Hugging Face model card metadata (`card_data.license`) and the PyPI package metadata.
 

@@ -10,12 +10,14 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
+from engine import config
+
 ROOT = Path(__file__).resolve().parents[1]
-WEIGHTS = ROOT / "weights"
+WEIGHTS = config.WEIGHTS_DIR
 
 HF_MODELS = {
     "detector": ("PekingU/rtdetr_v2_r18vd", None),
-    "vlm": ("mlx-community/Qwen3-VL-4B-Instruct-4bit", None),
+    "vlm": (config.VLM_REPO, None),
 }
 OWLV2 = ("google/owlv2-base-patch16-ensemble", None)
 
@@ -42,6 +44,8 @@ def main() -> None:
     ap.add_argument("--with-owlv2", action="store_true", help="pre-labeling model (Step 5 only)")
     args = ap.parse_args()
     models = dict(HF_MODELS)
+    if not config.USE_VLM:
+        models.pop("vlm")
     if args.with_owlv2:
         models["owlv2"] = OWLV2
     for name, (repo, rev) in models.items():

@@ -1,125 +1,182 @@
-"""Thin HTTP wrapper around engine.analyze.
+"""Private engine API. The datathon backend owns durable jobs, queueing and playback."""
 
-POST /api/v1/analyze       multipart `file` -> {"job_id": ..., "status": "processing"}
-GET  /api/v1/jobs/{job_id} -> {"job_id", "status", "verdict", "violations"}
-Every request needs header X-API-Key (env ENGINE_API_KEY), else 401.
-
-One sequential worker thread; models are loaded once at startup. If a job runs longer than
-RESULT_DEADLINE_S, GET returns the best result so far (the rules-only result produced before
-the VLM stage) with status "done".
-
-Run: ENGINE_API_KEY=... HF_HUB_OFFLINE=1 uv run uvicorn api.main:app --port 8000
-"""
 from __future__ import annotations
 
 import os
-import queue
+import re
 import secrets
-import shutil
-import threading
-import time
-import traceback
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 
+from api.service import EngineService, ServiceConfig, ServiceError
 from engine import config
 
-API_KEY = os.environ.get("ENGINE_API_KEY") or ""
-RESULT_DEADLINE_S = float(os.environ.get("ENGINE_DEADLINE_S", 240))
-UPLOADS = config.RUNS_DIR / "uploads"
-ALLOWED = {".mov", ".mp4", ".m4v", ".avi", ".mkv"}
-
-_jobs: dict[str, dict] = {}
-_lock = threading.Lock()
-_queue: "queue.Queue[str]" = queue.Queue()
+MODEL_ID = "kadys-model"
+ALLOWED = {".mov", ".mp4", ".webm", ".m4v", ".avi", ".mkv"}
 
 
-def _empty(job_id: str, status: str) -> dict:
-    return {"job_id": job_id, "status": status, "verdict": None, "violations": []}
+def create_app(service: EngineService | None = None, api_key: str | None = None):
+    key = api_key if api_key is not None else os.environ.get("ENGINE_API_KEY", "")
+    service = service or EngineService(
+        ServiceConfig(
+            root=config.RUNS_DIR / "service",
+            deadline_s=float(os.environ.get("ENGINE_DEADLINE_S", "210")),
+            startup_timeout_s=float(os.environ.get("ENGINE_STARTUP_TIMEOUT_S", "600")),
+            max_upload_bytes=int(os.environ.get("MAX_UPLOAD_MB", "100")) * 1024 * 1024,
+            retained_jobs=int(os.environ.get("ENGINE_RETAINED_JOBS", "200")),
+        )
+    )
 
-
-def _worker():
-    from engine import analyze
-    while True:
-        job_id = _queue.get()
-        with _lock:
-            job = _jobs[job_id]
-            job["started"] = time.time()
-
-        def on_partial(res, job=job):
-            with _lock:
-                job["partial"] = res
-
+    @asynccontextmanager
+    async def lifespan(app):
+        if not key:
+            raise RuntimeError(
+                "Set ENGINE_API_KEY explicitly before starting the engine"
+            )
+        service.start()
         try:
-            res = analyze(job["path"], job_id=job_id, on_partial=on_partial,
-                          deadline=job["created"] + RESULT_DEADLINE_S)
-            with _lock:
-                job["result"], job["status"] = res, "done"
-        except Exception as e:  # report, keep serving
-            with _lock:
-                job["status"], job["error"] = "failed", f"{type(e).__name__}: {e}"
-            traceback.print_exc()
+            yield
         finally:
-            _queue.task_done()
+            await run_in_threadpool(service.close)
+
+    app = FastAPI(title="Kadys model engine", lifespan=lifespan)
+    app.state.service = service
+
+    @app.exception_handler(ServiceError)
+    async def service_error(_request, exc):
+        headers = {"Retry-After": "2"} if exc.status in {409, 503} else None
+        return JSONResponse(
+            {"error": {"code": exc.code, "message": exc.message}},
+            status_code=exc.status,
+            headers=headers,
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_error(_request, exc):
+        return JSONResponse(
+            {"error": {"code": "HTTP_ERROR", "message": str(exc.detail)}},
+            status_code=exc.status_code,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request, _exc):
+        return JSONResponse(
+            {"error": {"code": "INVALID_REQUEST", "message": "Invalid form fields"}},
+            status_code=422,
+        )
+
+    def require_key(x_api_key: str | None = Header(default=None)):
+        if not x_api_key or not secrets.compare_digest(x_api_key, key):
+            raise ServiceError(401, "UNAUTHORIZED", "Invalid or missing X-API-Key")
+
+    auth = [Depends(require_key)]
+
+    @app.get("/health")
+    def health():
+        state = service.health()
+        return {
+            **state,
+            "model_id": MODEL_ID,
+            "vlm_enabled": config.USE_VLM,
+            "vlm_backend": config.VLM_BACKEND,
+            "vlm_repo": config.VLM_REPO,
+        }
+
+    @app.get("/api/v1/models", dependencies=auth)
+    def models():
+        return {"models": [{"id": MODEL_ID, "name": "Kadys model"}]}
+
+    @app.post("/api/v1/analyze", dependencies=auth)
+    async def submit(
+        file: Annotated[UploadFile, File()],
+        model_id: Annotated[str, Form()] = MODEL_ID,
+        client_job_id: Annotated[str | None, Form()] = None,
+    ):
+        path = None
+        accepted = False
+        try:
+            if model_id != MODEL_ID:
+                raise ServiceError(400, "UNKNOWN_MODEL", "Unknown model_id")
+            if client_job_id is not None:
+                if not re.fullmatch(r"[a-f0-9]{32}", client_job_id):
+                    raise ServiceError(
+                        400,
+                        "INVALID_JOB_ID",
+                        "client_job_id must be a 32-character hex UUID",
+                    )
+                try:
+                    service.get(client_job_id)
+                except ServiceError as exc:
+                    if exc.status != 404:
+                        raise
+                else:
+                    return {"job_id": client_job_id, "status": "processing"}
+            if not file.filename:
+                raise ServiceError(400, "FILE_REQUIRED", "A filename is required")
+            ext = Path(file.filename).suffix.lower()
+            if ext not in ALLOWED:
+                raise ServiceError(
+                    415, "UNSUPPORTED_FORMAT", "Unsupported video format"
+                )
+            state = service.health()
+            if state["busy"]:
+                raise ServiceError(
+                    409, "ENGINE_BUSY", "Engine is analysing another video"
+                )
+            if not state["ready"]:
+                raise ServiceError(
+                    503, "ENGINE_NOT_READY", "Engine models are loading or unavailable"
+                )
+            job_id = client_job_id or uuid.uuid4().hex
+            upload_dir = service.settings.root / "uploads"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            # Separate upload attempts must never overwrite a video already in use,
+            # including concurrent retries with the same client_job_id.
+            path = upload_dir / f"{uuid.uuid4().hex}{ext}"
+            size = 0
+            with path.open("wb") as output:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > service.settings.max_upload_bytes:
+                        raise ServiceError(
+                            413, "FILE_TOO_LARGE", "Video exceeds upload size limit"
+                        )
+                    await run_in_threadpool(output.write, chunk)
+            if not size:
+                raise ServiceError(400, "EMPTY_FILE", "Video file is empty")
+            result = service.submit(job_id, path)
+            accepted = True
+            return result
+        finally:
+            await file.close()
+            if path is not None and not accepted:
+                path.unlink(missing_ok=True)
+
+    @app.get("/api/v1/jobs/{job_id}", dependencies=auth)
+    def get_job(job_id: str):
+        return service.get(job_id)
+
+    @app.get("/api/v1/jobs/{job_id}/analysis", dependencies=auth)
+    def get_analysis(job_id: str):
+        return service.get(job_id, analysis=True)
+
+    @app.get("/api/v1/jobs/{job_id}/metadata", dependencies=auth)
+    def get_metadata(job_id: str):
+        return service.details(job_id)
+
+    @app.delete("/api/v1/jobs/{job_id}", dependencies=auth)
+    def cancel(job_id: str):
+        return service.cancel(job_id)
+
+    return app
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global API_KEY
-    if not API_KEY:
-        API_KEY = secrets.token_urlsafe(24)
-        print(f"[api] ENGINE_API_KEY not set; generated key for this run: {API_KEY}", flush=True)
-    import engine
-    from engine import perception, vlm
-    engine._models = perception.Models()   # load once
-    vlm.load()
-    threading.Thread(target=_worker, daemon=True).start()
-    yield
-
-
-app = FastAPI(title="Cash-desk discipline engine", lifespan=lifespan)
-
-
-def require_key(x_api_key: str | None = Header(default=None)):
-    if not x_api_key or not secrets.compare_digest(x_api_key, API_KEY):
-        raise HTTPException(status_code=401, detail="invalid or missing X-API-Key")
-
-
-@app.post("/api/v1/analyze", dependencies=[Depends(require_key)])
-async def submit(file: UploadFile = File(...)):
-    ext = Path(file.filename or "").suffix.lower() or ".mov"
-    if ext not in ALLOWED:
-        raise HTTPException(status_code=415, detail=f"unsupported file type {ext}")
-    job_id = uuid.uuid4().hex[:12]
-    UPLOADS.mkdir(parents=True, exist_ok=True)
-    path = UPLOADS / f"{job_id}{ext}"
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    with _lock:
-        _jobs[job_id] = {"path": str(path), "status": "processing", "created": time.time()}
-    _queue.put(job_id)
-    return {"job_id": job_id, "status": "processing"}
-
-
-@app.get("/api/v1/jobs/{job_id}", dependencies=[Depends(require_key)])
-async def get_job(job_id: str):
-    with _lock:
-        job = _jobs.get(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="unknown job_id")
-        if job["status"] == "done":
-            return job["result"]
-        if job["status"] == "failed":
-            return _empty(job_id, "failed")
-        if time.time() - job["created"] >= RESULT_DEADLINE_S and job.get("partial"):
-            job["status"], job["result"] = "done", job["partial"]  # best result so far
-            return job["result"]
-        return _empty(job_id, "processing")
-
-
-@app.get("/health")
-async def health():
-    return {"ok": True, "queue": _queue.qsize()}
+app = create_app()

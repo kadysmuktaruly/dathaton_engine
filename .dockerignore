@@ -1,0 +1,13 @@
+.git
+.venv
+.env*
+weights
+cache
+runs
+videos
+reports
+data
+__pycache__
+*.mov
+*.mp4
+*.webm

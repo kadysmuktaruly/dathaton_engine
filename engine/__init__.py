@@ -134,7 +134,7 @@ def _build(job_id, video_path, perc, fa, events):
 
 def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = True,
             debug_dir: str | Path | None = None, models=None, on_partial=None,
-            deadline: float | None = None) -> dict:
+            deadline: float | None = None, on_analysis=None) -> dict:
     """Analyze one video. on_partial(result) is called with a complete rules-only result before
     the VLM stage; `deadline` (epoch seconds) skips the VLM stage when time is short."""
     from engine import config, perception
@@ -151,8 +151,13 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
     t0 = time.time()
     fa, events, rule_t = detect_events(perc, fw, fh, video_path, None)
     T["rules_s"] = round(time.time() - t0, 2)
-    if on_partial is not None:
-        on_partial(_build(job_id, video_path, perc, fa, events)[0])
+    if on_partial is not None or on_analysis is not None:
+        partial, partial_kept, _ = _build(job_id, video_path, perc, fa, events)
+        if on_partial is not None:
+            on_partial(partial)
+        if on_analysis is not None:
+            from engine.backend import build_analysis
+            on_analysis(partial, build_analysis(perc.info, partial_kept, partial), True)
 
     vlm_budget = VLM_BUDGET_S
     if deadline is not None:
@@ -195,4 +200,7 @@ def analyze(video_path: str | Path, job_id: str | None = None, use_vlm: bool = T
     out_dir = Path(debug_dir or config.RUNS_DIR / "jobs" / job_id)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "debug.json").write_text(json.dumps(dbg, ensure_ascii=False, indent=1, default=str))
+    if on_analysis is not None:
+        from engine.backend import build_analysis
+        on_analysis(res, build_analysis(perc.info, kept, res), False)
     return res

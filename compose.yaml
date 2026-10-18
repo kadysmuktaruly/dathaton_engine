@@ -1,0 +1,29 @@
+services:
+  engine:
+    build: .
+    restart: unless-stopped
+    env_file: .env.deploy
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - engine-runs:/app/runs
+      - engine-cache:/app/cache
+      - engine-weights:/app/weights
+      - engine-hf:/app/hf
+    stop_grace_period: 15s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8001/health',timeout=3)); raise SystemExit(0 if d['ready'] else 1)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 600s
+      retries: 3
+
+networks:
+  default:
+    name: datathon-engine
+
+volumes:
+  engine-runs:
+  engine-cache:
+  engine-weights:
+  engine-hf:

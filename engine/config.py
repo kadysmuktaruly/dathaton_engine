@@ -1,17 +1,26 @@
 """Paths and tunable thresholds. Lines marked `# TUNE` were chosen to favour recall."""
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "videos"))
 LABELS_XLSX = Path(os.environ.get("LABELS_XLSX", ROOT / "open_labels.xlsx"))
 CATALOG_PATH = ROOT / "rules" / "rules_catalog.json"
-CACHE_DIR = ROOT / "cache"
-RUNS_DIR = ROOT / "runs"
-WEIGHTS_DIR = ROOT / "weights"
+CACHE_DIR = Path(os.environ.get("ENGINE_CACHE_DIR", ROOT / "cache"))
+RUNS_DIR = Path(os.environ.get("ENGINE_RUNS_DIR", ROOT / "runs"))
+WEIGHTS_DIR = Path(os.environ.get("ENGINE_WEIGHTS_DIR", ROOT / "weights"))
 
 DETECTOR_REPO = "PekingU/rtdetr_v2_r18vd"  # stock COCO detector (default)
-VLM_REPO = "mlx-community/Qwen3-VL-4B-Instruct-4bit"
+VLM_BACKEND = os.environ.get("ENGINE_VLM_BACKEND", "mlx" if sys.platform == "darwin" else "transformers")
+if VLM_BACKEND not in {"mlx", "transformers"}:
+    raise ValueError("ENGINE_VLM_BACKEND must be mlx or transformers")
+VLM_REPO = os.environ.get("ENGINE_VLM_REPO", "mlx-community/Qwen3-VL-4B-Instruct-4bit"
+                         if VLM_BACKEND == "mlx" else "Qwen/Qwen3-VL-4B-Instruct")
+USE_VLM = os.environ.get("ENGINE_USE_VLM", "1") == "1"
+DEVICE = os.environ.get("ENGINE_DEVICE") or None
+CPU_THREADS = int(os.environ.get("ENGINE_CPU_THREADS", "8"))
+ONNX_THREADS = int(os.environ.get("ENGINE_ONNX_THREADS", "2"))
 
 SAMPLE_FPS = 3.0  # TUNE
 USE_CACHE = os.environ.get("ENGINE_NO_CACHE", "0") != "1"  # set ENGINE_NO_CACHE=1 for cold timings

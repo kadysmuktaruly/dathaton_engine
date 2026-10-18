@@ -67,7 +67,8 @@ def scan_key(video_md5: str, box, crop) -> str:
     are part of the key, so a changed desk or crop never reuses old answers."""
     b = "-".join(str(int(v)) for v in box)
     c = "-".join(str(int(v)) for v in crop)
-    return f"{video_md5[:16]}_{PROMPT_VERSION}_s{STEP_S:g}_m{MAX_FRAMES}_b{b}_c{c}"
+    model = hashlib.sha256(f"{config.VLM_BACKEND}:{config.VLM_REPO}".encode()).hexdigest()[:10]
+    return f"{video_md5[:16]}_{PROMPT_VERSION}_{model}_s{STEP_S:g}_m{MAX_FRAMES}_b{b}_c{c}"
 
 
 def ask_frames(video: str, times: list[float], box, crop, budget: vlm.Budget | None = None) -> list[dict]:

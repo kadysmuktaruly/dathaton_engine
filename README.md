@@ -1,5 +1,8 @@
 # Cash-desk discipline engine (ForteBank Datathon 26)
 
+**Deployment branch:** see [docs/deployment.md](docs/deployment.md) for Ubuntu ARM,
+Docker, the backend adapter, API mapping and one-video-at-a-time scheduling.
+
 Local, offline analysis of cash-desk videos: `engine.analyze(video_path) -> dict` returns possible cash-discipline violations («признаки возможного нарушения») with timecodes, evidence frames, a Russian description and a legal reference taken **only** from `rules/rules_catalog.json`.
 
 **Reference rules:** [`docs/master-document.md`](docs/master-document.md) (the cashier routine, which violations are reported, what is tracked). It takes priority over older notes such as `reports/dataset_review.md`. Only catalog codes marked `"active": true` can be reported: A1, A2, A3, A4, A6, A7, B1, B3, B5, B8, B9, C2, D6, D7. The other codes stay in the catalog as reference.
@@ -9,7 +12,7 @@ No cloud calls. Models (all Apache-2.0/MIT) are listed in `MODELS.md`.
 ## Setup (once, needs network)
 ```bash
 uv sync                                               # Python 3.11 env
-uv run python -m tools.download_weights --with-owlv2  # RT-DETRv2, Qwen3-VL-4B (MLX 4-bit), RTMPose, OWLv2
+uv run python -m tools.download_weights  # RT-DETRv2, platform-specific Qwen3-VL-4B, RTMPose
 ```
 Then run offline:
 ```bash
@@ -86,11 +89,18 @@ Known limits: a key left in the safe lock (X-22) and the ID handover (X-2) are a
 
 ## HTTP API (Step 7)
 ```bash
-ENGINE_API_KEY=<secret> HF_HUB_OFFLINE=1 uv run uvicorn api.main:app --port 8000
-curl -H "X-API-Key: <secret>" -F "file=@videos/X-1.mov" localhost:8000/api/v1/analyze   # -> {"job_id": ...}
-curl -H "X-API-Key: <secret>" localhost:8000/api/v1/jobs/<job_id>                      # -> status + result
+ENGINE_API_KEY=your-secret HF_HUB_OFFLINE=1 uv run uvicorn api.main:app --host 127.0.0.1 --port 8001 --workers 1
+curl localhost:8001/health  # wait until ready=true
+curl -H "X-API-Key: your-secret" -F "file=@videos/X-1.mov" localhost:8001/api/v1/analyze
+curl -H "X-API-Key: your-secret" localhost:8001/api/v1/jobs/JOB_ID
+curl -H "X-API-Key: your-secret" localhost:8001/api/v1/jobs/JOB_ID/analysis  # datathon Analysis
 ```
-- No or wrong `X-API-Key` → 401. If `ENGINE_API_KEY` is unset, a random key is generated and printed at startup.
-- One sequential worker; models load once at startup (~5 s). The VLM budget is 60 s per video (desk scan ≤ 18 s, targeted checks ≤ 22 s).
-- Jobs answer `processing` → `done` | `failed`. If a job runs past `ENGINE_DEADLINE_S` (default 240 s), the best result so far is returned: the rules-only result built before the VLM stage. The VLM stage is also skipped when the deadline is near.
+- Set `ENGINE_API_KEY` explicitly; missing configuration stops startup. Wrong request keys → 401.
+- One warm inference process, no internal queue. Busy submissions → 409; loading → 503.
+- Jobs answer `processing` → `done` | `failed`. `ENGINE_DEADLINE_S` defaults to 210 s.
+  At the deadline actual inference is terminated before returning a partial snapshot or failure.
+- `/analysis` adds catalog codes, duration and normalized player boxes while `/jobs/JOB_ID`
+  preserves the strict graded result. `DELETE /api/v1/jobs/JOB_ID` cancels and reloads the worker.
+- Linux uses the CPU PyTorch Qwen checkpoint; Mac retains MLX. Benchmark CPU latency and
+  accuracy before deployment. Job IDs are ephemeral; datathon owns durable history and queueing.
 - `ENGINE_NO_CACHE=1` disables the perception/scan caches (for cold timings).

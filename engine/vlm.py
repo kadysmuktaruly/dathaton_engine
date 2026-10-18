@@ -23,8 +23,17 @@ _processor = None
 def load():
     global _model, _processor
     if _model is None:
-        from mlx_vlm import load as mlx_load
-        _model, _processor = mlx_load(config.VLM_REPO)
+        if config.VLM_BACKEND == "mlx":
+            from mlx_vlm import load as mlx_load
+            _model, _processor = mlx_load(config.VLM_REPO)
+        else:
+            import torch
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+            device = config.DEVICE or "cpu"
+            _model = Qwen3VLForConditionalGeneration.from_pretrained(
+                config.VLM_REPO, dtype=torch.float32, attn_implementation="sdpa",
+            ).to(device).eval()
+            _processor = AutoProcessor.from_pretrained(config.VLM_REPO)
     return _model, _processor
 
 
@@ -37,6 +46,24 @@ def to_pil(bgr: np.ndarray, max_side: int = 768) -> Image.Image:
 
 
 def ask(images: list[Image.Image], prompt: str, max_tokens: int = 160) -> str:
+    if config.VLM_BACKEND == "transformers":
+        import torch
+        model, processor = load()
+        messages = [{"role": "user", "content": [
+            *({"type": "image", "image": im} for im in images),
+            {"type": "text", "text": prompt},
+        ]}]
+        inputs = processor.apply_chat_template(
+            messages, tokenize=True, add_generation_prompt=True,
+            return_dict=True, return_tensors="pt",
+        ).to(model.device)
+        inputs.pop("token_type_ids", None)
+        with torch.inference_mode():
+            generated = model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+        return processor.batch_decode(
+            generated[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0]
     from mlx_vlm import generate
     from mlx_vlm.prompt_utils import apply_chat_template
     model, processor = load()
@@ -164,7 +191,8 @@ def catchall(video_path, perc, fa, budget=None, step: float = CATCHALL_STEP_S) -
     times, last = [], -1e9
     for t in busy:
         if t - last >= step:
-            times.append(float(t)); last = t
+            times.append(float(t))
+            last = t
     out = []
     for _, t, f in iter_frames_at(video_path, times, perc.info.crop):
         if budget is not None and not budget.ok(2.0):

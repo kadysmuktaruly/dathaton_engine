@@ -1,0 +1,17 @@
+# Copy into datathon; apply together with its existing docker-compose.yml.
+services:
+  api:
+    environment:
+      ENGINE_URL: http://engine:8001
+      ENGINE_API_KEY: ${ENGINE_API_KEY:?set ENGINE_API_KEY in datathon .env}
+      ENGINE_TIMEOUT_SEC: "220"
+      JOB_TIMEOUT_SEC: "240"
+      WORKER_CONCURRENCY: "1"
+    networks:
+      - default
+      - engine
+
+networks:
+  engine:
+    external: true
+    name: datathon-engine

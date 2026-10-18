@@ -100,7 +100,7 @@ class Models:
         from transformers import RTDetrImageProcessor, RTDetrV2ForObjectDetection
 
         self.torch = torch
-        self.device = device or ("mps" if torch.backends.mps.is_available() else
+        self.device = device or config.DEVICE or ("mps" if torch.backends.mps.is_available() else
                                  "cuda" if torch.cuda.is_available() else "cpu")
         self.source = config.detector_source()  # raises if ENGINE_DETECTOR_PATH is bad
         self.proc = RTDetrImageProcessor.from_pretrained(self.source)
@@ -114,6 +114,15 @@ class Models:
             if not onnx:
                 raise FileNotFoundError("RTMPose weights missing: run `python -m tools.download_weights`")
             self.pose = RTMPose(onnx[0], model_input_size=POSE_INPUT, backend="onnxruntime", device="cpu")
+            # rtmlib does not accept SessionOptions. Replace its default session so pose
+            # does not create a thread pool spanning all server cores.
+            import onnxruntime as ort
+            options = ort.SessionOptions()
+            options.intra_op_num_threads = config.ONNX_THREADS
+            options.inter_op_num_threads = 1
+            self.pose.session = ort.InferenceSession(
+                onnx[0], sess_options=options, providers=["CPUExecutionProvider"],
+            )
 
     def detect(self, frames_rgb: list[np.ndarray]) -> list[list[tuple[str, float, np.ndarray]]]:
         torch = self.torch
