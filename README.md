@@ -57,7 +57,7 @@ video → bar crop → 3 fps sampling with exact timestamps
 | Code | How it is detected | Training clips |
 |---|---|---|
 | C2 | door-sized persistent background change on the back wall after someone enters an empty room; timecode = first visitor through the open door, else the door opening | X-30, X-32, X-33 |
-| B5 | safe seen open ≥ 8 s while the cashier works; or safe seen open after the cashier left the room | X-20, X-22 |
+| B5 | safe seen open ≥ 8 s while the cashier works; or, after the cashier left the room, the safe seen open or the key left in the safe lock (lock patch check, see below) | X-20, X-22 (key: X-22, X-11; key taken: X-12, X-23) |
 | B1 | cash / collection bag on the desk when the cashier leaves (scan or departure check); cash already on the desk when a new client arrives, incl. the previous client's bundle still lying at the same place | X-4, X-15, X-26, X-38 |
 | B8 | departure check (VLM, tight desk crop): stamps left on the desk, answered or listed among the desk items | X-24 |
 | B9 | laptop screen lit after the cashier left (dark-pixel share of the screen); not flagged when the VLM sees the lock screen | X-11, X-28 |
@@ -70,7 +70,9 @@ video → bar crop → 3 fps sampling with exact timestamps
 | A4 | cashier leaves the room while a client stays and cash lies on the desk (optional; no training clip) | — |
 | A6, A3 | not reported: A6 is a debug-only candidate (ID cards are not reliably visible); A3 has no signal yet | X-2, X-1 |
 
-Known limits: a key left in the safe lock (X-22) and the ID handover (X-2) are a few pixels at 464×848, so neither the detector nor the 4B VLM sees them reliably. The B9 lock-screen check relies on this dataset's lock screen being a landscape photo.
+**Key in the safe lock** (`engine/safe_key.py`): the key is 3–5 px at 464×848, below what the detector can see, so it is not a detector class. After each departure the engine takes the median of the empty-room frames, finds the lock as the strongest small dark dot on the left part of the safe door (position relative to the fine-tuned `safe` box), and checks whether the rows at the lock differ, left of it, from the rows above, the rows below and the line between them. Door edges and background edges are lines and match one of these; a key matches none. Score (share of door brightness): key left 0.085–0.095 (X-11, X-22), no key ≤ 0.020 (10 other departures); threshold 0.045. It only runs with the fine-tuned detector's safe box.
+
+Known limits: the ID handover (X-2) is a few pixels at 464×848, so neither the detector nor the 4B VLM sees it reliably. The key check assumes the key head sticks out to the left of the lock, as in all clips here; a camera on the other side of the safe would need the side flipped. The B9 lock-screen check relies on this dataset's lock screen being a landscape photo.
 
 ## Tools
 - `python -m tools.labels`: parsed labels (duplicate files merged by md5)

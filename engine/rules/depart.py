@@ -7,7 +7,8 @@ Each departure is checked separately; one departure may yield several violations
 Signals:
   B1  cash / collection bag on the desk: VLM desk scan run that spans the departure, or the
       departure check (engine.vlm_checks) seeing cash or the bag on the desk after the exit
-  B5  confident safe_open detections while the room is empty
+  B5  confident safe_open detections while the room is empty; else the key left in the safe lock
+      (engine.safe_key: the lock patch on the median of the empty-room frames)
   B8  departure check: stamps left on the desk (answered, or listed among the desk items)
   B9  laptop screen lit after the exit (few dark pixels in the screen area); with the VLM, a
       lit screen showing the lock-screen photo is not flagged
@@ -33,8 +34,10 @@ SCREEN_TOP = 0.6            # upper share of the laptop box = the screen
 SCREEN_DARK_REL = 0.45      # pixel darker than this x frame mean = black screen
 SCREEN_LIT_MAX_DARK = 0.18  # TUNE: lit screen <= this dark share (lit 0.04-0.12, black 0.24-0.36)
 AFTER_EXIT_S = (1.0, 2.0)
+KEY_AFTER_EXIT_S = 0.5      # empty-room frames for the key check start this long after the exit
 
 B1_SCORE, B5_SCORE, B8_SCORE = 0.75, 0.6, 0.6
+B5_KEY_SCORE = 0.6
 B9_SCORE, B9_LOCKED_SCORE = 0.6, 0.1
 
 
@@ -90,17 +93,42 @@ def _b1(f: Facts, d: dict, t_leave: float, chk: dict | None) -> Event | None:
 
 def _b5(f: Facts, d: dict, t_leave: float) -> Event | None:
     o = f.objects
-    if o.empty or "cls" not in o:
+    if not o.empty and "cls" in o:
+        t1 = d["t_exit"] + d["absent_s"] + ABSENCE_PAD_S
+        so = o[(o.cls == "safe_open") & (o.t > d["t_exit"]) & (o.t <= t1)]
+        n = int(so.t.nunique()) if len(so) else 0
+        if n >= SAFE_OPEN_MIN_FRAMES:
+            r = so.sort_values("conf", ascending=False).iloc[0]
+            return Event("B5", t_leave, d["t_exit"], B5_SCORE, evidence_t=[t_leave],
+                         boxes={float(r.t): [("сейф открыт", [r.x0, r.y0, r.x1, r.y1])]},
+                         info={"reason": "safe_open_cashier_left", "safe_open_frames": n, "t_exit": d["t_exit"]})
+    return _b5_key(f, d, t_leave)
+
+
+def empty_room_times(f: Facts, d: dict) -> list[float]:
+    """Sampled times while the room is empty after this departure (skipping the first moment)."""
+    dur = f.perc.info.duration
+    t0, t1 = d["t_exit"] + KEY_AFTER_EXIT_S, min(d["t_exit"] + d["absent_s"], dur - 0.1)
+    ts = [float(t) for t in np.arange(t0, t1 + 1e-6, 1 / 3)]
+    return ts or [min(d["t_exit"] + 1.0, dur - 0.1)]
+
+
+def _b5_key(f: Facts, d: dict, t_leave: float) -> Event | None:
+    """Key left in the safe lock (only with a safe box from the fine-tuned detector: the lock is
+    searched relative to it, and a look-alike box is not precise enough)."""
+    safe = f.scene.safe
+    if safe is None or f.video is None or f.perc is None \
+            or not str((getattr(f.scene, "provenance", None) or {}).get("safe", "")).startswith("explicit"):
         return None
-    t1 = d["t_exit"] + d["absent_s"] + ABSENCE_PAD_S
-    so = o[(o.cls == "safe_open") & (o.t > d["t_exit"]) & (o.t <= t1)]
-    n = int(so.t.nunique()) if len(so) else 0
-    if n < SAFE_OPEN_MIN_FRAMES:
+    from engine import safe_key
+    r = safe_key.check(f.video, f.perc, safe, empty_room_times(f, d))
+    if not r or not r["key"]:
         return None
-    r = so.sort_values("conf", ascending=False).iloc[0]
-    return Event("B5", t_leave, d["t_exit"], B5_SCORE, evidence_t=[t_leave],
-                 boxes={float(r.t): [("сейф открыт", [r.x0, r.y0, r.x1, r.y1])]},
-                 info={"reason": "safe_open_cashier_left", "safe_open_frames": n, "t_exit": d["t_exit"]})
+    lx, ly = r["lock"]
+    pad = max(6.0, 0.12 * safe.w)
+    return Event("B5", t_leave, d["t_exit"], B5_KEY_SCORE, evidence_t=[t_leave],
+                 boxes={t_leave: [("ключ в замке сейфа", [lx - 1.5 * pad, ly - pad, lx + pad, ly + pad])]},
+                 info={"reason": "key_left_cashier_left", "key": r, "t_exit": d["t_exit"]})
 
 
 def screen_dark_share(video: str, perc, laptop, times: list[float]) -> list[float]:

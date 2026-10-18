@@ -13,7 +13,7 @@ COLS = ["t", "cls", "conf", "x0", "y0", "x1", "y1"]
 def _facts(objects=(), checks=None, laptop=None):
     hands = pd.DataFrame({"t": [7.0, 9.0], "machine": [False, False], "laptop": [False, True], "safe": [False, False]})
     return SimpleNamespace(objects=pd.DataFrame(list(objects), columns=COLS), checks=checks, scan=None, hands=hands,
-                           scene=SimpleNamespace(laptop=laptop), video=None, perc=None)
+                           scene=SimpleNamespace(laptop=laptop, safe=None), video=None, perc=None)
 
 
 @pytest.fixture(autouse=True)
@@ -79,3 +79,36 @@ def test_c2_timecode_prefers_visitor_through_open_door():
     f = SimpleNamespace(persons=p, sessions=[Session(1, 13.0, 18.0, [3])])
     assert first_visitor_through(f, 3.0).enter == 13.0
     assert first_visitor_through(f, 12.5) is None  # entered with the opening itself: that's the door time
+
+
+def _key_facts(monkeypatch, key: bool, provenance="explicit:safe"):
+    seen = {}
+
+    def fake_check(video, perc, safe, times):
+        seen["times"] = times
+        return {"key": key, "score": 0.09 if key else 0.01, "dot": 0.4, "lock": [198, 302], "n_frames": len(times)}
+
+    from engine import safe_key
+    monkeypatch.setattr(safe_key, "check", fake_check)
+    f = _facts()
+    f.scene = SimpleNamespace(laptop=None, safe=SimpleNamespace(w=73.0), provenance={"safe": provenance})
+    f.video, f.perc = "v.mov", SimpleNamespace(info=SimpleNamespace(duration=20.0))
+    return f, seen
+
+
+def test_key_left_in_safe_is_b5(monkeypatch):
+    f, seen = _key_facts(monkeypatch, key=True)
+    evs = depart.detect(f)
+    assert _codes(evs) == ["B5"] and evs[0].info["reason"] == "key_left_cashier_left"
+    assert evs[0].start == 9.0  # leave time, like the other departure rules
+    assert min(seen["times"]) > DEP["t_exit"] and max(seen["times"]) <= DEP["t_exit"] + DEP["absent_s"]
+
+
+def test_key_taken_is_not_b5(monkeypatch):
+    f, _ = _key_facts(monkeypatch, key=False)
+    assert depart.detect(f) == []
+
+
+def test_key_check_needs_fine_tuned_safe(monkeypatch):
+    f, seen = _key_facts(monkeypatch, key=True, provenance="proxy:tall box")
+    assert depart.detect(f) == [] and not seen

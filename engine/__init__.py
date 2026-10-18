@@ -11,6 +11,7 @@ SEEN_TEXT = {  # rule-based 'что видно' sentences (the VLM may replace t
     ("C2", "visitor_through_open_door"): "дверь кассы осталась открытой, и через неё в помещение кассы прошёл посетитель",
     ("B5", "safe_open_while_working"): "сейф остаётся открытым, пока кассир работает за столом",
     ("B5", "safe_open_cashier_left"): "кассир покинул помещение кассы, сейф остался открытым",
+    ("B5", "key_left_cashier_left"): "кассир покинул помещение кассы, ключ остался в замке сейфа",
     ("B1", "cash_left_cashier_away"): "на столе кассира остались наличные деньги без присмотра, кассир отошёл от рабочего места",
     ("B1", "bag_left_cashier_away"): "на столе кассира осталась инкассаторская сумка, кассир покинул помещение кассы",
     ("B1", "cash_open_new_client"): "на столе открыто лежат наличные деньги, когда к кассе подходит следующий клиент",
@@ -85,8 +86,16 @@ def detect_events(perc, frame_w: int, frame_h: int, video: str | None = None, bu
     return fa, merge(events), timings
 
 
+DEPART_B5 = {"safe_open_cashier_left", "key_left_cashier_left"}
+
+
 def _resolve(events):
-    """One violation per (code, moment): the same departure can be found by two B1 signals."""
+    """One violation per (code, moment): the same departure can be found by two B1 signals.
+    A 'safe open while working' run that lasts until a departure B5 (safe open or key left after
+    the exit) is the same safe episode: the departure event, which says how it ended, is kept."""
+    dep = [e for e in events if e.code == "B5" and e.info.get("reason") in DEPART_B5]
+    events = [e for e in events if not (e.code == "B5" and e.info.get("reason") == "safe_open_while_working"
+                                        and any(e.start <= d.start <= e.end + 2.0 for d in dep))]
     out = []
     for e in sorted(events, key=lambda e: -e.score):
         if any(o.code == e.code and abs(o.start - e.start) <= 2.0 for o in out):
@@ -111,7 +120,8 @@ def _build(job_id, video_path, perc, fa, events):
     """Kept events -> graded JSON (+ debug event list)."""
     from engine import catalog, evidence, output
     crop = perc.info.crop
-    kept = [e for e in events if e.score >= VERDICT_THRESHOLD]
+    # same timecode: the more confident violation first
+    kept = sorted((e for e in events if e.score >= VERDICT_THRESHOLD), key=lambda e: (round(e.start, 1), -e.score))
     violations, debug_events = [], []
     for ev in kept:
         tc = round(ev.start, 1)
